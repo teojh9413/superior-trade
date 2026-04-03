@@ -26,6 +26,7 @@ Phase 3 complete:
 - prompt refinement
 - command error handling and cleaner runtime logging
 - Koyeb deployment guidance
+- operator handover notes in `HANDOVER.md`
 
 ## Project Structure
 
@@ -35,6 +36,7 @@ superior-discord-bot/
   requirements.txt
   .env.example
   README.md
+  HANDOVER.md
   cogs/
   core/
   services/
@@ -42,6 +44,12 @@ superior-discord-bot/
   knowledge/
   tests/
 ```
+
+## Handover
+
+If another agent or operator will deploy this repository, start with:
+
+- [`HANDOVER.md`](/c:/Users/User/Desktop/superior-discord-bot/HANDOVER.md)
 
 ## Setup
 
