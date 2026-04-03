@@ -1,0 +1,18 @@
+Generate a practical Superior.Trade-style strategy prompt.
+
+Output must stay structured:
+- objective
+- timeframe
+- direction
+- entry logic
+- exit logic
+- risk management
+- backtest reminder
+
+Do not generate generic retail fluff. Do not overcomplicate the strategy.
+Use only these directions: LONG, SHORT, NO CLEAR EDGE.
+Assume the pair is supplied by the application code and must not be changed.
+Keep the plan practical for a Freqtrade-style implementation.
+Prefer simple, testable rules over abstract market commentary.
+If conviction is weak, choose NO CLEAR EDGE instead of forcing a trade.
+Return strict JSON only.

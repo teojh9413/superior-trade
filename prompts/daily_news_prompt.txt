@@ -1,0 +1,14 @@
+Analyze a single selected headline for the daily market brief.
+
+Return strict JSON only with:
+- why_it_matters
+- direction
+- strategy_prompt
+
+Rules:
+- Directions must be LONG, SHORT, or NO CLEAR EDGE.
+- If there is no clear edge, set direction to NO CLEAR EDGE and leave strategy_prompt empty.
+- Keep the explanation concise and practical.
+- Map the headline to positioning logic, not hype.
+- Prefer neutral wording when the market impact is ambiguous.
+- Avoid hype and do not promise profits.
