@@ -1,305 +1,351 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-
-import aiohttp
+from difflib import SequenceMatcher
+from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from core.config import AppConfig
-from services.llm_service import LLMService, NewsInsight
-from services.pair_mapper import PairMapper, PairMappingResult
+from services.hyperliquid_service import HyperliquidService, MarketInfo
+from services.prompt_service import PromptService
 
 LOGGER = logging.getLogger(__name__)
 
-CRYPTO_DOMAINS = "reuters.com,bloomberg.com,coindesk.com,theblock.co,cointelegraph.com"
-MACRO_DOMAINS = "reuters.com,bloomberg.com,wsj.com,ft.com,cnbc.com,apnews.com"
+SOURCE_PRIORITY = {
+    "Reuters": 0,
+    "Bloomberg": 1,
+    "Associated Press": 2,
+    "AP News": 2,
+    "Financial Times": 3,
+    "The Wall Street Journal": 4,
+    "WSJ": 4,
+    "CNBC": 5,
+    "MarketWatch": 6,
+    "Yahoo Finance": 7,
+    "Benzinga": 8,
+    "Business Insider": 8,
+    "CoinDesk": 9,
+    "The Block": 10,
+    "CryptoSlate": 11,
+    "Cointelegraph": 12,
+    "PYMNTS.com": 13,
+}
+CRYPTO_QUERIES = [
+    "crypto market",
+    "bitcoin ethereum",
+    "crypto ETF",
+    "stablecoin regulation",
+]
+TRADFI_QUERIES = [
+    "stock market today",
+    "tesla stock",
+    "nvidia stock",
+    "gold price",
+    "oil market",
+]
+CRYPTO_KEYWORDS = (
+    "crypto",
+    "bitcoin",
+    "btc",
+    "ethereum",
+    "ether",
+    "eth",
+    "solana",
+    "sol",
+    "xrp",
+    "ripple",
+    "doge",
+    "dogecoin",
+    "stablecoin",
+    "token",
+    "blockchain",
+)
+TRADFI_KEYWORDS = (
+    "stock",
+    "stocks",
+    "equity",
+    "equities",
+    "s&p",
+    "sp500",
+    "nasdaq",
+    "dow",
+    "fed",
+    "federal reserve",
+    "treasury",
+    "bond",
+    "yield",
+    "gold",
+    "silver",
+    "oil",
+    "crude",
+    "tesla",
+    "nvidia",
+    "apple",
+    "amazon",
+    "microsoft",
+    "market",
+)
 
 
 @dataclass(frozen=True, slots=True)
 class NewsArticle:
     title: str
-    description: str
+    source: str
+    published_at: datetime
+    summary: str
     url: str
-    source_name: str
     category: str
-    published_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class DailyBriefItem:
-    category: str
-    headline: str
-    source_name: str
-    url: str
-    why_it_matters: str
-    pair: str
-    direction: str
-    strategy_prompt: str | None
+    market: MarketInfo
 
 
 @dataclass(frozen=True, slots=True)
 class DailyBrief:
-    generated_at: str
-    items: list[DailyBriefItem]
-    used_fallback: bool
+    generated_at_label: str
+    items: list[NewsArticle]
+    prompts: list[str]
 
 
 class NewsService:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        *,
+        config: AppConfig,
+        hyperliquid_service: HyperliquidService,
+        prompt_service: PromptService,
+    ) -> None:
         self.config = config
+        self.hyperliquid_service = hyperliquid_service
+        self.prompt_service = prompt_service
 
-    async def generate_daily_brief(
-        self, *, llm_service: LLMService, pair_mapper: PairMapper
-    ) -> DailyBrief:
-        articles = await self._fetch_curated_articles()
-        selected = self._select_exact_slots(articles)
-        items: list[DailyBriefItem] = []
-        used_fallback = not bool(self.config.news_api_key)
+    async def generate_daily_brief(self, now: datetime | None = None) -> DailyBrief:
+        tz = resolve_brief_timezone(self.config.timezone)
+        current = now.astimezone(tz) if now else datetime.now(tz)
+        crypto_pool = await self._gather_news_pool(CRYPTO_QUERIES, category="crypto", now=current)
+        tradfi_pool = await self._gather_news_pool(TRADFI_QUERIES, category="tradfi", now=current)
 
-        for article in selected:
-            market_request = infer_market_request(article.title, article.description, article.category)
-            mapping = pair_mapper.resolve(market_request)
-            if not mapping.found or not mapping.pair:
-                mapping = fallback_mapping(article.category)
-            insight = await llm_service.generate_news_insight(
-                title=article.title,
-                description=article.description,
-                source_name=article.source_name,
-                pair=mapping.pair or "BTC/USDC:USDC",
-                market_context=mapping.explanation,
-            )
-            if article.source_name == "Superior fallback":
-                insight = NewsInsight(
-                    why_it_matters=insight.why_it_matters,
-                    direction="NO CLEAR EDGE",
-                    strategy_prompt=None,
-                    used_fallback=True,
-                )
-            used_fallback = used_fallback or insight.used_fallback
-            items.append(
-                DailyBriefItem(
-                    category=article.category,
-                    headline=article.title,
-                    source_name=article.source_name,
-                    url=article.url,
-                    why_it_matters=insight.why_it_matters,
-                    pair=mapping.pair or "BTC/USDC:USDC",
-                    direction=insight.direction,
-                    strategy_prompt=insight.strategy_prompt,
-                )
-            )
+        selected = crypto_pool[:2] + tradfi_pool[:1]
+        if len(selected) != 3:
+            raise RuntimeError("Unable to build a complete 24-hour brief with 2 crypto and 1 tradfi headlines.")
 
-        return DailyBrief(
-            generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            items=items,
-            used_fallback=used_fallback,
-        )
-
-    def build_placeholder_brief(self) -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        lines = [
-            "🗞️ **Superior Market Brief Preview**",
-            f"Generated: {timestamp}",
-            "₿ Crypto slot 1: Placeholder headline pending Phase 2 news integration.",
-            "🪙 Crypto slot 2: Placeholder headline pending Phase 2 news integration.",
-            "🌍 Macro slot: Placeholder headline pending Phase 2 news integration.",
-            "⚙️ Scheduler and formatting are live. News fetching arrives in Phase 2.",
+        prompts = [
+            self.prompt_service.build_brief_prompt(article.market, article.title, article.summary)
+            for article in selected
         ]
-        return "\n".join(lines)
+        return DailyBrief(
+            generated_at_label=current.strftime("%d %b %Y, GMT+8"),
+            items=selected,
+            prompts=prompts,
+        )
 
-    async def _fetch_curated_articles(self) -> list[NewsArticle]:
-        if not self.config.news_api_key:
-            LOGGER.info("NEWS_API_KEY not configured; using fallback daily brief headlines.")
-            return fallback_articles()
-
-        crypto_query = (
-            '(bitcoin OR btc OR ethereum OR eth OR solana OR sol OR crypto) '
-            'AND (ETF OR inflows OR regulation OR exchange OR treasury OR adoption OR hack)'
-        )
-        macro_query = (
-            '(Federal Reserve OR inflation OR tariffs OR oil OR gold OR S&P 500 OR Nasdaq OR dollar '
-            'OR crude OR OPEC OR Nvidia OR Apple OR Tesla)'
-        )
-        crypto_articles = await self._fetch_newsapi_articles(
-            query=crypto_query,
-            domains=CRYPTO_DOMAINS,
-            category="crypto",
-            page_size=8,
-        )
-        macro_articles = await self._fetch_newsapi_articles(
-            query=macro_query,
-            domains=MACRO_DOMAINS,
-            category="macro",
-            page_size=8,
-        )
-        return dedupe_articles(crypto_articles + macro_articles)
-
-    async def _fetch_newsapi_articles(
-        self, *, query: str, domains: str, category: str, page_size: int
+    async def _gather_news_pool(
+        self, queries: list[str], *, category: str, now: datetime
     ) -> list[NewsArticle]:
-        since = (datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat()
-        url = f"{self.config.news_api_base_url.rstrip('/')}/everything"
-        params = {
-            "q": query,
-            "domains": domains,
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": str(page_size),
-            "from": since,
-        }
-        headers = {"X-Api-Key": self.config.news_api_key or ""}
-        try:
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.config.llm_timeout_seconds)
-            ) as session:
-                async with session.get(url, params=params, headers=headers) as response:
-                    if response.status != 200:
-                        LOGGER.warning("News API request failed with status %s.", response.status)
-                        return []
-                    payload = await response.json()
-        except aiohttp.ClientError:
-            LOGGER.exception("News API request failed before completion.")
-            return []
+        articles: list[NewsArticle] = []
+        for query in queries:
+            raw_results = await self._search_news(query=query)
+            for result in raw_results:
+                article = await self._build_article_from_result(result=result, category=category, now=now)
+                if article is not None:
+                    articles.append(article)
 
-        articles = []
-        for item in payload.get("articles", []):
-            title = (item.get("title") or "").strip()
-            url = (item.get("url") or "").strip()
-            if not title or not url:
-                continue
-            articles.append(
-                NewsArticle(
-                    title=title,
-                    description=(item.get("description") or "").strip(),
-                    url=url,
-                    source_name=((item.get("source") or {}).get("name") or "Unknown source").strip(),
-                    category=category,
-                    published_at=(item.get("publishedAt") or "").strip(),
-                )
-            )
-        return articles
+        deduped = deduplicate_articles(articles)
+        return sort_articles(deduped)
 
-    def _select_exact_slots(self, articles: list[NewsArticle]) -> list[NewsArticle]:
-        crypto = [article for article in articles if article.category == "crypto"]
-        macro = [article for article in articles if article.category == "macro"]
+    async def _build_article_from_result(
+        self, *, result: dict[str, str], category: str, now: datetime
+    ) -> NewsArticle | None:
+        published_at = parse_ddgs_date(result.get("date", ""), now=now)
+        if published_at is None:
+            return None
+        if published_at < now.astimezone(timezone.utc) - timedelta(hours=24):
+            return None
 
-        selected = crypto[:2] + macro[:1]
-        if len(selected) == 3:
-            return selected
+        title = clean_text(result.get("title", ""))
+        summary = summarize_text(result.get("body", ""))
+        source = clean_source(result.get("source", "Unknown"))
+        url = result.get("url", "").strip()
+        if not title or not summary or not url:
+            return None
+        if "opinion" in title.lower():
+            return None
+        if not matches_requested_category(title=title, summary=summary, category=category):
+            return None
 
-        fallback_pool = fallback_articles()
-        crypto_fallback = [article for article in fallback_pool if article.category == "crypto"]
-        macro_fallback = [article for article in fallback_pool if article.category == "macro"]
+        market = await self.hyperliquid_service.infer_market_from_text(f"{title} {summary}", category)
+        if market is None:
+            return None
 
-        while len(crypto) < 2 and crypto_fallback:
-            crypto.append(crypto_fallback.pop(0))
-        while len(macro) < 1 and macro_fallback:
-            macro.append(macro_fallback.pop(0))
-        return crypto[:2] + macro[:1]
+        return NewsArticle(
+            title=title,
+            source=source,
+            published_at=published_at,
+            summary=summary,
+            url=url,
+            category=category,
+            market=market,
+        )
+
+    async def _search_news(self, *, query: str) -> list[dict[str, str]]:
+        return await asyncio.to_thread(run_ddgs_news_search, query, self.config)
 
 
-def fallback_articles() -> list[NewsArticle]:
-    return [
-        NewsArticle(
-            title="Bitcoin holds key risk barometer status as traders watch ETF and macro flows",
-            description="With no verified live feed configured, BTC remains the default crypto benchmark for the brief.",
-            url="https://superior.trade",
-            source_name="Superior fallback",
-            category="crypto",
-            published_at="",
-        ),
-        NewsArticle(
-            title="Ether sentiment stays event-driven with positioning sensitive to regulation and flows",
-            description="ETH serves as the second crypto slot when live non-duplicate headlines are unavailable.",
-            url="https://superior.trade",
-            source_name="Superior fallback",
-            category="crypto",
-            published_at="",
-        ),
-        NewsArticle(
-            title="Macro risk tone remains the main driver for equity, metals, and energy proxies",
-            description="The non-crypto slot falls back to broad risk appetite when no current macro headline is available.",
-            url="https://superior.trade",
-            source_name="Superior fallback",
-            category="macro",
-            published_at="",
-        ),
-    ]
-
-
-def dedupe_articles(articles: list[NewsArticle]) -> list[NewsArticle]:
-    deduped: list[NewsArticle] = []
-    seen_keys: set[str] = set()
-    for article in sorted(articles, key=lambda item: item.published_at, reverse=True):
-        key = normalize_title(article.title)
-        if key in seen_keys:
+def run_ddgs_news_search(query: str, config: AppConfig) -> list[dict[str, str]]:
+    ddgs_executable = resolve_ddgs_cli_path(config)
+    for backend in ("auto", "all", "duckduckgo", "bing"):
+        temp_file = Path(tempfile.gettempdir()) / f"superior_ddgs_{os.getpid()}_{abs(hash((query, backend)))}.json"
+        command = [
+            ddgs_executable,
+            "news",
+            "-q",
+            query,
+            "-t",
+            "d",
+            "-m",
+            "15",
+            "-b",
+            backend,
+            "-o",
+            str(temp_file),
+            "-nc",
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            LOGGER.warning("DDGS news search failed for query '%s' with backend '%s': %s", query, backend, completed.stderr.strip())
             continue
-        seen_keys.add(key)
+        if not temp_file.exists():
+            continue
+        try:
+            payload = json.loads(temp_file.read_text(encoding="utf-8"))
+        finally:
+            temp_file.unlink(missing_ok=True)
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def resolve_ddgs_cli_path(config: AppConfig) -> str:
+    if config.ddgs_cli_path:
+        return config.ddgs_cli_path
+    which = shutil.which("ddgs")
+    if which:
+        return which
+    scripts_dir = Path(sys.executable).resolve().parent / ("Scripts" if os.name == "nt" else "bin")
+    executable = scripts_dir / ("ddgs.exe" if os.name == "nt" else "ddgs")
+    if executable.exists():
+        return str(executable)
+    raise FileNotFoundError("DDGS CLI was not found. Install the 'ddgs' package or set DDGS_CLI_PATH.")
+
+
+def parse_ddgs_date(value: str, *, now: datetime) -> datetime | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    cleaned = re.sub(r"^[A-Za-z]+\s*", "", raw).strip()
+    try:
+        return datetime.fromisoformat(cleaned.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    relative_match = re.search(r"(\d+)\s+(minute|minutes|hour|hours|day|days)\s+ago", cleaned.lower())
+    if not relative_match:
+        return None
+    amount = int(relative_match.group(1))
+    unit = relative_match.group(2)
+    if unit.startswith("minute"):
+        delta = timedelta(minutes=amount)
+    elif unit.startswith("hour"):
+        delta = timedelta(hours=amount)
+    else:
+        delta = timedelta(days=amount)
+    return now.astimezone(timezone.utc) - delta
+
+
+def summarize_text(text: str, limit: int = 170) -> str:
+    compact = clean_text(text)
+    if len(compact) <= limit:
+        return compact
+    sentence_match = re.match(r"^(.{1," + str(limit) + r"}?[.!?])\s", compact)
+    if sentence_match:
+        return sentence_match.group(1).strip()
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def clean_text(text: str) -> str:
+    text = text.replace("鈥", "'")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def clean_source(source: str) -> str:
+    source = clean_text(source)
+    source = source.replace("路 via Yahoo Finance", "")
+    return source
+
+
+def deduplicate_articles(articles: list[NewsArticle]) -> list[NewsArticle]:
+    deduped: list[NewsArticle] = []
+    seen_urls: set[str] = set()
+    for article in articles:
+        if article.url in seen_urls:
+            continue
+        if any(similar_titles(article.title, existing.title) for existing in deduped):
+            continue
+        seen_urls.add(article.url)
         deduped.append(article)
     return deduped
 
 
-def normalize_title(title: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+def similar_titles(left: str, right: str) -> bool:
+    normalized_left = re.sub(r"[^a-z0-9]+", " ", left.lower()).strip()
+    normalized_right = re.sub(r"[^a-z0-9]+", " ", right.lower()).strip()
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+    return SequenceMatcher(a=normalized_left, b=normalized_right).ratio() >= 0.82
 
 
-def infer_market_request(title: str, description: str, category: str) -> str:
-    text = f"{title} {description}".lower()
-    keyword_map = [
-        ("bitcoin", "btc"),
-        ("btc", "btc"),
-        ("ethereum", "eth"),
-        ("ether", "eth"),
-        ("eth", "eth"),
-        ("solana", "sol"),
-        ("sol ", "sol"),
-        ("gold", "gold"),
-        ("silver", "silver"),
-        ("brent", "brent"),
-        ("oil", "oil"),
-        ("crude", "wti"),
-        ("opec", "oil"),
-        ("s&p", "sp500"),
-        ("sp 500", "sp500"),
-        ("nasdaq", "nvda"),
-        ("nvidia", "nvda"),
-        ("apple", "aapl"),
-        ("amazon", "amzn"),
-        ("google", "googl"),
-        ("alphabet", "googl"),
-        ("microsoft", "msft"),
-        ("meta", "meta"),
-        ("tesla", "tsla"),
-        ("dollar", "dxy"),
-        ("dxy", "dxy"),
-        ("vix", "vix"),
-    ]
-    for needle, mapped in keyword_map:
-        if contains_term(text, needle):
-            return mapped
-    return "btc" if category == "crypto" else "sp500"
-
-
-def fallback_mapping(category: str) -> PairMappingResult:
-    if category == "crypto":
-        return PairMappingResult(
-            requested="btc",
-            found=True,
-            pair="BTC/USDC:USDC",
-            market_type="crypto perp",
-            explanation="Fallback to BTC as the broad crypto benchmark.",
-        )
-    return PairMappingResult(
-        requested="sp500",
-        found=True,
-        pair="XYZ-SP500/USDC:USDC",
-        market_type="HIP3 perp",
-        explanation="Fallback to SP500 as the broad macro risk proxy.",
+def sort_articles(articles: list[NewsArticle]) -> list[NewsArticle]:
+    return sorted(
+        articles,
+        key=lambda article: (
+            source_rank(article.source),
+            -article.published_at.timestamp(),
+            article.title,
+        ),
     )
 
 
-def contains_term(text: str, needle: str) -> bool:
-    pattern = r"(?<![a-z0-9])" + re.escape(needle.strip()) + r"(?![a-z0-9])"
-    return re.search(pattern, text) is not None
+def source_rank(source: str) -> int:
+    for known_source, rank in SOURCE_PRIORITY.items():
+        if known_source.lower() in source.lower():
+            return rank
+    return 50
+
+
+def matches_requested_category(*, title: str, summary: str, category: str) -> bool:
+    text = f"{title} {summary}".lower()
+    has_crypto = any(keyword in text for keyword in CRYPTO_KEYWORDS)
+    has_tradfi = any(keyword in text for keyword in TRADFI_KEYWORDS)
+    if category == "crypto":
+        return has_crypto
+    return has_tradfi and not has_crypto
+
+
+def resolve_brief_timezone(timezone_name: str):
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        if timezone_name == "Asia/Singapore":
+            LOGGER.warning("ZoneInfo data for Asia/Singapore is unavailable; falling back to fixed GMT+8.")
+            return timezone(timedelta(hours=8), name="GMT+8")
+        raise

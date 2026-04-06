@@ -6,5 +6,5 @@ class ConfigurationError(SuperiorBotError):
     """Raised when required configuration is missing."""
 
 
-class PairMappingError(SuperiorBotError):
-    """Raised when a pair cannot be safely mapped."""
+class MarketResolutionError(SuperiorBotError):
+    """Raised when an official Hyperliquid market cannot be resolved."""

@@ -1,55 +1,94 @@
 # Superior.Trade Discord Bot
 
-A focused, command-first Discord bot for Superior.Trade built with `discord.py`.
+A focused Discord bot for:
 
-## Status
+- daily market brief posting
+- `/briefnow`
+- `/trade <asset_name>`
+- `/health`
 
-Phase 1 complete:
+This is not a knowledge-base bot and not a general chat bot.
 
-- full repo scaffold
-- slash commands and cog structure
-- markdown knowledge loading and section retrieval
-- curated static pair mapping from `SKILL.md`
-- formatting helpers
-- daily scheduler skeleton
+## Scope
 
-Phase 2 complete:
+The bot now does only four things:
 
-- LLM-backed `/ask` and `/trade`
-- optional official website and GitHub grounding
-- daily brief generation with exact 2 crypto + 1 non-crypto slots
-- uncertainty fallback handling
+1. Post a daily market brief at `3:00 PM` in the configured timezone.
+2. Generate the same brief on demand with `/briefnow`.
+3. Suggest a practical strategy for a single asset with `/trade`.
+4. Show basic runtime status with `/health`.
 
-Phase 3 complete:
+Removed from scope:
 
-- pytest coverage for pair mapping, markdown retrieval, and formatting
-- prompt refinement
-- command error handling and cleaner runtime logging
-- Koyeb deployment guidance
-- operator handover notes in `HANDOVER.md`
+- `/ask`
+- `/reloadkb`
+- markdown knowledge retrieval
+- FAQ / SKILL / MARKETING runtime loading
+- frontend explanations about ticker mapping
 
-## Project Structure
+## Commands
 
-```text
-superior-discord-bot/
-  bot.py
-  requirements.txt
-  .env.example
-  README.md
-  HANDOVER.md
-  cogs/
-  core/
-  services/
-  prompts/
-  knowledge/
-  tests/
-```
+- `/health`
+- `/briefnow`
+- `/trade <asset_name>`
 
-## Handover
+`/trade` only accepts a simple asset name such as:
 
-If another agent or operator will deploy this repository, start with:
+- `btc`
+- `eth`
+- `tesla`
+- `gold`
 
-- [`HANDOVER.md`](/c:/Users/User/Desktop/superior-discord-bot/HANDOVER.md)
+If the input is a long sentence or question, the bot replies with:
+
+`My role is to suggest trading strategies, please use /trade + name of desired asset`
+
+## Architecture
+
+Main services:
+
+- `services/news_service.py`
+- `services/hyperliquid_service.py`
+- `services/prompt_service.py`
+- `services/formatter.py`
+
+Other runtime support:
+
+- `bot.py`
+- `core/config.py`
+- `core/scheduler.py`
+- `core/logging.py`
+
+## News Retrieval
+
+The bot uses the DDGS CLI news flow:
+
+- DuckDuckGo news search through subprocess execution
+- strict filtering to the last 24 hours
+- deduplication of similar headlines
+- preference for major / reputable sources
+- selection of exactly:
+  - 2 crypto headlines
+  - 1 tradfi headline
+
+The brief contains:
+
+- headline
+- concise summary
+- three short strategy prompts
+
+## Hyperliquid Ticker Validation
+
+`/trade` and the brief prompts validate markets using the official Hyperliquid `info` endpoint.
+
+The bot:
+
+- fetches live market metadata from Hyperliquid
+- resolves simple asset inputs to current official markets
+- uses the official ticker directly in frontend output
+- does not expose internal mapping language to users
+
+If no valid Hyperliquid market exists, the bot says so clearly.
 
 ## Setup
 
@@ -61,8 +100,8 @@ pip install -r requirements.txt
 ```
 
 3. Copy `.env.example` to `.env`.
-4. Fill in your secrets and runtime settings.
-5. Run a local dry-run:
+4. Fill in the required values.
+5. Run a dry-run:
 
 ```bash
 python bot.py --dry-run
@@ -76,136 +115,57 @@ python bot.py
 
 ## Environment Variables
 
-Required for Discord:
+Required:
 
 - `DISCORD_BOT_TOKEN`
-
-Optional but recommended:
-
-- `LLM_API_KEY`
-- `LLM_BASE_URL`
-- `LLM_MODEL`
-- `DEEPSEEK_API_KEY`
-- `OPENAI_API_KEY`
-- `NEWS_API_KEY`
 - `DAILY_POST_CHANNEL_ID`
-- `LOG_LEVEL`
+
+Runtime:
+
 - `DRY_RUN`
 - `TIMEZONE`
 - `DAILY_BRIEF_HOUR`
 - `DAILY_BRIEF_MINUTE`
-- `SUPERIOR_WEBSITE_URL`
-- `SUPERIOR_GITHUB_ORG`
+- `LOG_LEVEL`
 
-Provider notes:
+Optional:
 
-- If `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` are set, the bot uses that chat-completions-compatible provider.
-- If only `OPENAI_API_KEY` is set, the bot defaults `LLM_BASE_URL` to `https://api.openai.com/v1`.
-- If no live LLM provider is configured, `/ask`, `/trade`, and `/briefnow` fall back to safe deterministic output.
-- If `NEWS_API_KEY` is missing, the daily brief still returns exactly three slots using explicit fallback headlines.
+- `DDGS_CLI_PATH`
+- `HYPERLIQUID_INFO_URL`
 
-DeepSeek-style example:
+Defaults:
 
-```env
-LLM_API_KEY=your_key
-LLM_BASE_URL=https://your-provider.example/v1
-LLM_MODEL=your-model-name
-```
+- `TIMEZONE=Asia/Singapore`
+- `DAILY_BRIEF_HOUR=15`
+- `DAILY_BRIEF_MINUTE=0`
+- `HYPERLIQUID_INFO_URL=https://api.hyperliquid.xyz/info`
 
-## Slash Commands
+## Local Validation
 
-- `/ask <question>`
-- `/trade <asset_or_market>`
-- `/briefnow`
-- `/health`
-- `/reloadkb`
-
-## Knowledge Rules
-
-- Load `FAQ.md`, `SKILL.md`, and `MARKETING.md` from `knowledge/`.
-- Use `SKILL.md` as the main operational source of truth.
-- Use `MARKETING.md` only when it is relevant and subtle.
-- Do not invent product features or supported pairs.
-
-## Local Testing
-
-Run the dry-run:
+Dry-run:
 
 ```bash
 python bot.py --dry-run
 ```
 
-Run the test suite:
+Tests:
 
 ```bash
 pytest -q
 ```
 
-## Koyeb Deployment
+## Deployment Notes
 
-This bot should be deployed to Koyeb as a `Worker` service, not a web service. It does not expose an HTTP port and should run as a background process.
+- This bot is a background worker, not a web service.
+- It should run on a process/worker host or server.
+- It should not be deployed to static website hosting.
+- The DDGS CLI must be available in the runtime environment, either on `PATH` or via `DDGS_CLI_PATH`.
 
-### Koyeb Control Panel
+## Files To Check First
 
-1. Push this repo to GitHub.
-2. In Koyeb, create a new app from GitHub.
-3. Choose a Python buildpack deployment.
-4. Set the service type to `Worker`.
-5. Set the run command to:
-
-```bash
-python bot.py
-```
-
-6. Add environment variables:
-
-```text
-DISCORD_BOT_TOKEN=...
-DRY_RUN=false
-TIMEZONE=Asia/Singapore
-DAILY_BRIEF_HOUR=15
-DAILY_BRIEF_MINUTE=0
-DAILY_POST_CHANNEL_ID=...
-LLM_API_KEY=...
-LLM_BASE_URL=...
-LLM_MODEL=...
-NEWS_API_KEY=...
-```
-
-7. Deploy the service.
-
-### Koyeb CLI Example
-
-If you use the Koyeb CLI, a worker-style buildpack deployment looks like this:
-
-```bash
-koyeb apps init superior-discord-bot \
-  --git github.com/<your-org>/<your-repo> \
-  --git-branch main \
-  --git-builder buildpack \
-  --git-buildpack-run-command "python bot.py" \
-  --type worker \
-  --env DISCORD_BOT_TOKEN=... \
-  --env DRY_RUN=false \
-  --env TIMEZONE=Asia/Singapore \
-  --env DAILY_BRIEF_HOUR=15 \
-  --env DAILY_BRIEF_MINUTE=0 \
-  --env DAILY_POST_CHANNEL_ID=... \
-  --env LLM_API_KEY=... \
-  --env LLM_BASE_URL=... \
-  --env LLM_MODEL=... \
-  --env NEWS_API_KEY=...
-```
-
-### Deployment Notes
-
-- Use `python bot.py` on Koyeb because the runtime is Linux-based.
-- Keep `DRY_RUN=false` in production.
-- The scheduled brief is timezone-aware and defaults to `15:00 Asia/Singapore`, which is GMT+8.
-- If you want to pin Python explicitly for the platform, add a `runtime.txt` file later.
-
-## Notes
-
-- `SKILL.md` is the primary operational source of truth.
-- The bot is slash-command only.
-- Deterministic rules live in code. The model writes only the natural-language output.
+- `bot.py`
+- `services/news_service.py`
+- `services/hyperliquid_service.py`
+- `services/prompt_service.py`
+- `services/formatter.py`
+- `.env.example`

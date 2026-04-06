@@ -12,15 +12,12 @@ from discord.ext import commands
 
 from core.config import AppConfig, load_config
 from core.exceptions import ConfigurationError
-from core.formatting import format_daily_brief
 from core.logging import configure_logging
 from core.scheduler import DailyScheduler
-from services.github_service import GitHubService
-from services.knowledge_service import KnowledgeService
-from services.llm_service import LLMService
+from services.formatter import format_daily_brief
+from services.hyperliquid_service import HyperliquidService
 from services.news_service import NewsService
-from services.pair_mapper import PairMapper
-from services.website_service import WebsiteService
+from services.prompt_service import PromptService
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,12 +36,9 @@ class SuperiorCommandTree(app_commands.CommandTree):
 
 @dataclass(slots=True)
 class ServiceContainer:
-    knowledge: KnowledgeService
-    pair_mapper: PairMapper
-    llm: LLMService
     news: NewsService
-    github: GitHubService
-    website: WebsiteService
+    hyperliquid: HyperliquidService
+    prompt: PromptService
 
 
 class SuperiorTradeBot(commands.Bot):
@@ -66,7 +60,6 @@ class SuperiorTradeBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self._load_extensions(
             [
-                "cogs.ask",
                 "cogs.trade",
                 "cogs.brief",
                 "cogs.admin",
@@ -106,48 +99,39 @@ class SuperiorTradeBot(commands.Bot):
             LOGGER.warning("Configured channel %s is not messageable.", channel_id)
             return
 
-        brief = await self.services.news.generate_daily_brief(
-            llm_service=self.services.llm,
-            pair_mapper=self.services.pair_mapper,
-        )
-        message = format_daily_brief(brief)
-        await channel.send(message)
+        brief = await self.services.news.generate_daily_brief()
+        await channel.send(format_daily_brief(brief))
         LOGGER.info("Posted scheduled brief to channel %s.", channel_id)
 
 
 def build_services(config: AppConfig) -> ServiceContainer:
-    knowledge = KnowledgeService(config.knowledge_dir)
-    knowledge.load()
+    hyperliquid = HyperliquidService(config=config)
+    prompt = PromptService(config=config)
+    news = NewsService(config=config, hyperliquid_service=hyperliquid, prompt_service=prompt)
     return ServiceContainer(
-        knowledge=knowledge,
-        pair_mapper=PairMapper(),
-        llm=LLMService(config=config),
-        news=NewsService(config=config),
-        github=GitHubService(config=config),
-        website=WebsiteService(config=config),
+        news=news,
+        hyperliquid=hyperliquid,
+        prompt=prompt,
     )
 
 
 async def run_dry_mode(config: AppConfig, services: ServiceContainer) -> None:
     LOGGER.info("Dry-run mode enabled. No Discord connection will be made.")
-    LOGGER.info("Knowledge files loaded: %s", ", ".join(sorted(services.knowledge.list_sources())))
-    LOGGER.info("Pair mapper supports %s curated aliases.", len(services.pair_mapper.list_supported_aliases()))
-    LOGGER.info("LLM configured: %s", "yes" if services.llm.is_configured() else "no")
-    LOGGER.info("News API configured: %s", "yes" if config.news_api_key else "no")
+    LOGGER.info("DDGS CLI resolved to: %s", config.ddgs_cli_path or "auto")
+    LOGGER.info("Scheduler configured for %s.", f"{config.daily_brief_hour:02d}:{config.daily_brief_minute:02d} {config.timezone}")
     bot = SuperiorTradeBot(config=config, services=services)
     await bot.setup_hook()
     LOGGER.info("Dry-run loaded %s slash commands.", len(bot.tree.get_commands()))
-    LOGGER.info("Scheduler skeleton configured for %s.", bot.scheduler.describe())
     bot.scheduler.stop()
     await bot.close()
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Superior.Trade Discord bot")
+    parser = argparse.ArgumentParser(description="Superior.Trade Discord market brief bot")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Load configuration and services without connecting to Discord.",
+        help="Load configuration and commands without connecting to Discord.",
     )
     return parser.parse_args()
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfoNotFoundError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class DailyScheduler:
         return f"{self.hour:02d}:{self.minute:02d} {self.timezone_name}"
 
     def seconds_until_next_run(self, now: datetime | None = None) -> float:
-        tz = ZoneInfo(self.timezone_name)
+        tz = resolve_timezone(self.timezone_name)
         current = now.astimezone(tz) if now else datetime.now(tz)
         target = current.replace(hour=self.hour, minute=self.minute, second=0, microsecond=0)
         if target <= current:
@@ -51,3 +52,13 @@ class DailyScheduler:
         except asyncio.CancelledError:
             LOGGER.info("Daily scheduler loop stopped.")
             raise
+
+
+def resolve_timezone(timezone_name: str) -> datetime.tzinfo:
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        if timezone_name == "Asia/Singapore":
+            LOGGER.warning("ZoneInfo data for Asia/Singapore is unavailable; falling back to fixed GMT+8.")
+            return timezone(timedelta(hours=8), name="GMT+8")
+        raise
