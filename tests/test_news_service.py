@@ -39,7 +39,7 @@ def test_similar_titles_detects_near_duplicates() -> None:
 
 
 def test_deduplicate_articles_removes_duplicate_headlines() -> None:
-    market = MarketInfo("BTC", "BTC", "BTC", "perp", "perp", ("btc",))
+    market = MarketInfo("BTC", "BTC", "BTC/USDC:USDC", "BTC", "perp", "perp", "cross", ("btc",))
     articles = [
         NewsArticle(
             "Bitcoin jumps as ETF flows return",

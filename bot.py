@@ -14,10 +14,13 @@ from core.config import AppConfig, load_config
 from core.exceptions import ConfigurationError
 from core.logging import configure_logging
 from core.scheduler import DailyScheduler
+from services.backtest_registry import BacktestRegistry
+from services.backtest_service import BacktestService
 from services.formatter import format_daily_brief
 from services.hyperliquid_service import HyperliquidService
 from services.news_service import NewsService
 from services.prompt_service import PromptService
+from services.superior_api_service import SuperiorApiService
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +42,9 @@ class ServiceContainer:
     news: NewsService
     hyperliquid: HyperliquidService
     prompt: PromptService
+    superior_api: SuperiorApiService
+    backtest_registry: BacktestRegistry
+    backtest: BacktestService
 
 
 class SuperiorTradeBot(commands.Bot):
@@ -62,6 +68,7 @@ class SuperiorTradeBot(commands.Bot):
             [
                 "cogs.trade",
                 "cogs.brief",
+                "cogs.backtest",
                 "cogs.admin",
             ]
         )
@@ -108,10 +115,21 @@ def build_services(config: AppConfig) -> ServiceContainer:
     hyperliquid = HyperliquidService(config=config)
     prompt = PromptService(config=config)
     news = NewsService(config=config, hyperliquid_service=hyperliquid, prompt_service=prompt)
+    superior_api = SuperiorApiService(config=config)
+    registry = BacktestRegistry(config.backtest_registry_path)
+    backtest = BacktestService(
+        config=config,
+        hyperliquid_service=hyperliquid,
+        superior_api_service=superior_api,
+        registry=registry,
+    )
     return ServiceContainer(
         news=news,
         hyperliquid=hyperliquid,
         prompt=prompt,
+        superior_api=superior_api,
+        backtest_registry=registry,
+        backtest=backtest,
     )
 
 
@@ -119,6 +137,7 @@ async def run_dry_mode(config: AppConfig, services: ServiceContainer) -> None:
     LOGGER.info("Dry-run mode enabled. No Discord connection will be made.")
     LOGGER.info("DDGS CLI resolved to: %s", config.ddgs_cli_path or "auto")
     LOGGER.info("Scheduler configured for %s.", f"{config.daily_brief_hour:02d}:{config.daily_brief_minute:02d} {config.timezone}")
+    LOGGER.info("Superior Trade API configured: %s", "yes" if config.superior_trade_api_key else "no")
     bot = SuperiorTradeBot(config=config, services=services)
     await bot.setup_hook()
     LOGGER.info("Dry-run loaded %s slash commands.", len(bot.tree.get_commands()))
@@ -127,7 +146,7 @@ async def run_dry_mode(config: AppConfig, services: ServiceContainer) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Superior.Trade Discord market brief bot")
+    parser = argparse.ArgumentParser(description="Superior.Trade market brief and backtest bot")
     parser.add_argument(
         "--dry-run",
         action="store_true",

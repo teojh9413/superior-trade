@@ -31,9 +31,9 @@ def test_build_searchable_keys_includes_aliases() -> None:
 
 def test_sort_market_candidates_prefers_perp_and_xyz() -> None:
     candidates = [
-        MarketInfo("flx:TSLA", "FLX-TSLA", "TSLA", "perp", "perp", ("tsla",)),
-        MarketInfo("xyz:TSLA", "XYZ-TSLA", "TSLA", "perp", "perp", ("tsla",)),
-        MarketInfo("TSLA/USDC", "TSLA", "TSLA", "spot", "spot", ("tsla",)),
+        MarketInfo("flx:TSLA", "FLX-TSLA", "FLX-TSLA/USDH:USDH", "TSLA", "perp", "perp:flx", "cross", ("tsla",)),
+        MarketInfo("xyz:TSLA", "XYZ-TSLA", "XYZ-TSLA/USDC:USDC", "TSLA", "perp", "perp:xyz", "cross", ("tsla",)),
+        MarketInfo("TSLA/USDC", "TSLA", "TSLA/USDC", "TSLA", "spot", "spot", None, ("tsla",)),
     ]
 
     sorted_candidates = sort_market_candidates(candidates)

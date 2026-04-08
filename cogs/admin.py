@@ -18,6 +18,7 @@ class AdminCog(commands.Cog):
             scheduler_description=self.bot.scheduler.describe(),
             dry_run=self.bot.config.dry_run,
             market_count=await self.bot.services.hyperliquid.market_count(),
+            superior_api_configured=self.bot.services.superior_api.is_configured(),
         )
         await interaction.followup.send(response, ephemeral=True)
 

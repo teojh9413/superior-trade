@@ -7,13 +7,14 @@
 
 ## Current Product Scope
 
-This bot is now narrowly scoped.
+This bot is narrowly scoped.
 
 It only supports:
 
 - scheduled daily market brief posting
 - `/briefnow`
 - `/trade <asset_name>`
+- `/backtest <asset_name>`
 - `/health`
 
 It is not a FAQ bot and not a general chat bot.
@@ -35,6 +36,7 @@ pytest -q
 
 - `DISCORD_BOT_TOKEN`
 - `DAILY_POST_CHANNEL_ID`
+- `SUPERIOR_TRADE_API_KEY`
 
 Recommended runtime values:
 
@@ -48,6 +50,10 @@ Optional:
 
 - `DDGS_CLI_PATH`
 - `HYPERLIQUID_INFO_URL`
+- `SUPERIOR_TRADE_API_URL`
+- `BACKTEST_REGISTRY_PATH`
+- `BACKTEST_POLL_SECONDS`
+- `BACKTEST_TIMEOUT_SECONDS`
 
 Reference:
 
@@ -56,9 +62,14 @@ Reference:
 ## Important Behavior Rules
 
 - `/trade` only accepts a simple asset name.
+- `/backtest` only accepts a simple asset name.
 - Invalid long natural-language `/trade` inputs must reply exactly:
 
 `My role is to suggest trading strategies, please use /trade + name of desired asset`
+
+- Invalid long natural-language `/backtest` inputs must reply exactly:
+
+`My role is to run backtests, please use /backtest + name of desired asset`
 
 - The frontend should not mention mapping logic.
 - The frontend should not mention internal ticker mechanics.
@@ -70,6 +81,11 @@ Reference:
   - headline
   - concise summary
   - three short strategy prompts
+- `/backtest` must stay deterministic:
+  - 7 fixed strategy templates in code
+  - sequential execution
+  - cleanup of bot-owned backtests before and after runs
+  - return only the best single result
 
 ## Data Sources
 
@@ -81,10 +97,15 @@ Ticker discovery:
 
 - official Hyperliquid `info` endpoint
 
+Backtesting:
+
+- Superior.Trade API
+
 ## Deployment Notes
 
 - This is a worker/process app, not a web app.
 - The runtime must have the DDGS CLI available.
+- `/backtest` requires a valid `SUPERIOR_TRADE_API_KEY`.
 - Do not deploy to static/shared website hosting.
 
 ## Security Notes
@@ -103,6 +124,7 @@ Store them in server environment variables or host secret storage only.
    - `/health`
    - `/briefnow`
    - `/trade btc`
+   - `/backtest btc`
 6. Confirm the production `DAILY_POST_CHANNEL_ID`.
 
 ## Files Most Relevant To Operators
@@ -113,3 +135,6 @@ Store them in server environment variables or host secret storage only.
 - [`services/hyperliquid_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/hyperliquid_service.py)
 - [`services/prompt_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/prompt_service.py)
 - [`services/formatter.py`](/c:/Users/User/Desktop/superior-discord-bot/services/formatter.py)
+- [`services/backtest_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/backtest_service.py)
+- [`services/superior_api_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/superior_api_service.py)
+- [`services/strategy_templates.py`](/c:/Users/User/Desktop/superior-discord-bot/services/strategy_templates.py)

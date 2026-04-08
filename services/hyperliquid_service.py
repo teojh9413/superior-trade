@@ -14,7 +14,16 @@ LOGGER = logging.getLogger(__name__)
 
 SIMPLE_ASSET_RE = re.compile(r"^[A-Za-z0-9._-]{1,20}$")
 RAW_NAME_RE = re.compile(r"^(?P<prefix>[a-z0-9]+):(?P<symbol>[A-Za-z0-9]+)$")
-PERP_PREFIX_PRIORITY = {"xyz": 0, "km": 1, "flx": 2, "cash": 3, "vntl": 4, "hyna": 5}
+PERP_PREFIX_PRIORITY = {"": 0, "xyz": 1, "km": 2, "flx": 3, "cash": 4, "vntl": 5, "hyna": 6}
+PERP_QUOTE_BY_PREFIX = {
+    "": ("USDC", "USDC"),
+    "xyz": ("USDC", "USDC"),
+    "cash": ("USDT0", "USDT0"),
+    "flx": ("USDH", "USDH"),
+    "km": ("USDH", "USDH"),
+    "hyna": ("USDE", "USDE"),
+    "vntl": ("USDH", "USDH"),
+}
 ALIAS_MAP = {
     "bitcoin": "btc",
     "xrp": "xrp",
@@ -55,9 +64,11 @@ ALIAS_MAP = {
 class MarketInfo:
     raw_name: str
     ticker: str
+    pair: str
     symbol: str
     market_type: str
     source_group: str
+    margin_mode: str | None
     searchable_keys: tuple[str, ...]
 
 
@@ -133,7 +144,24 @@ class HyperliquidService:
                 if resolved is not None:
                     return resolved
 
-        if category == "crypto" and any(term in lower for term in ("crypto", "bitcoin", "ethereum", "ether", "eth", "solana", "sol", "xrp", "ripple", "doge", "dogecoin", "stablecoin", "token")):
+        if category == "crypto" and any(
+            term in lower
+            for term in (
+                "crypto",
+                "bitcoin",
+                "ethereum",
+                "ether",
+                "eth",
+                "solana",
+                "sol",
+                "xrp",
+                "ripple",
+                "doge",
+                "dogecoin",
+                "stablecoin",
+                "token",
+            )
+        ):
             return await self.resolve_asset("btc")
         if any(term in lower for term in ("stock market", "equities", "stocks", "s&p 500", "sp500")):
             return await self.resolve_asset("sp500")
@@ -147,9 +175,7 @@ class HyperliquidService:
         if self._markets_cache and self._markets_cache_time and now - self._markets_cache_time < timedelta(minutes=10):
             return self._markets_cache
 
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=20)
-        ) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
             perp_payload, spot_payload = await fetch_market_payloads(
                 session=session,
                 info_url=self.config.hyperliquid_info_url,
@@ -162,9 +188,7 @@ class HyperliquidService:
         return markets
 
 
-async def fetch_market_payloads(
-    *, session: aiohttp.ClientSession, info_url: str
-) -> tuple[list[dict], dict]:
+async def fetch_market_payloads(*, session: aiohttp.ClientSession, info_url: str) -> tuple[list[dict], dict]:
     perp_task = session.post(info_url, json={"type": "allPerpMetas"})
     spot_task = session.post(info_url, json={"type": "spotMeta"})
     async with perp_task as perp_response, spot_task as spot_response:
@@ -184,14 +208,19 @@ def build_market_catalog(perp_payload: list[dict], spot_payload: dict) -> list[M
                 continue
             ticker = standardize_market_name(raw_name)
             symbol = extract_symbol(raw_name)
+            prefix = extract_prefix(raw_name)
+            pair = build_pair_from_raw_name(raw_name)
             searchable = build_searchable_keys(ticker=ticker, symbol=symbol, raw_name=raw_name)
+            margin_mode = "isolated" if entry.get("onlyIsolated") or entry.get("marginMode") == "strictIsolated" else "cross"
             markets.append(
                 MarketInfo(
                     raw_name=raw_name,
                     ticker=ticker,
+                    pair=pair,
                     symbol=symbol,
                     market_type="perp",
-                    source_group="perp",
+                    source_group=f"perp:{prefix or 'core'}",
+                    margin_mode=margin_mode,
                     searchable_keys=searchable,
                 )
             )
@@ -200,15 +229,17 @@ def build_market_catalog(perp_payload: list[dict], spot_payload: dict) -> list[M
         raw_name = str(entry.get("name", "")).strip()
         if not raw_name or raw_name.startswith("@"):
             continue
-        base = raw_name.split("/", 1)[0]
-        searchable = build_searchable_keys(ticker=base.upper(), symbol=base.upper(), raw_name=raw_name)
+        base = raw_name.split("/", 1)[0].upper()
+        searchable = build_searchable_keys(ticker=base, symbol=base, raw_name=raw_name)
         markets.append(
             MarketInfo(
                 raw_name=raw_name,
-                ticker=base.upper(),
-                symbol=base.upper(),
+                ticker=base,
+                pair=raw_name.upper(),
+                symbol=base,
                 market_type="spot",
                 source_group="spot",
+                margin_mode=None,
                 searchable_keys=searchable,
             )
         )
@@ -226,7 +257,7 @@ def normalize_asset_request(value: str) -> str:
 def standardize_market_name(raw_name: str) -> str:
     match = RAW_NAME_RE.match(raw_name)
     if not match:
-        return raw_name.upper()
+        return raw_name.upper().split("/", 1)[0]
     prefix = match.group("prefix").upper()
     symbol = match.group("symbol").upper()
     return f"{prefix}-{symbol}"
@@ -237,6 +268,24 @@ def extract_symbol(raw_name: str) -> str:
     if not match:
         return raw_name.upper().split("/", 1)[0]
     return match.group("symbol").upper()
+
+
+def extract_prefix(raw_name: str) -> str:
+    match = RAW_NAME_RE.match(raw_name)
+    if not match:
+        return ""
+    return match.group("prefix").lower()
+
+
+def build_pair_from_raw_name(raw_name: str) -> str:
+    match = RAW_NAME_RE.match(raw_name)
+    if not match:
+        symbol = raw_name.upper()
+        return f"{symbol}/USDC:USDC"
+    prefix = match.group("prefix").lower()
+    symbol = match.group("symbol").upper()
+    quote, settle = PERP_QUOTE_BY_PREFIX.get(prefix, ("USDC", "USDC"))
+    return f"{match.group('prefix').upper()}-{symbol}/{quote}:{settle}"
 
 
 def build_searchable_keys(*, ticker: str, symbol: str, raw_name: str) -> tuple[str, ...]:
@@ -252,11 +301,8 @@ def build_searchable_keys(*, ticker: str, symbol: str, raw_name: str) -> tuple[s
 
 
 def sort_market_candidates(candidates: list[MarketInfo]) -> list[MarketInfo]:
-    def sort_key(candidate: MarketInfo) -> tuple[int, int, str]:
-        prefix = ""
-        match = RAW_NAME_RE.match(candidate.raw_name)
-        if match:
-            prefix = match.group("prefix").lower()
+    def sort_key(candidate: MarketInfo) -> tuple[int, int, int, str]:
+        prefix = extract_prefix(candidate.raw_name)
         return (
             0 if candidate.market_type == "perp" else 1,
             0 if ":" not in candidate.raw_name else 1,

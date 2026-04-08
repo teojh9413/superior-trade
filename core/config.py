@@ -22,6 +22,9 @@ class AppConfig:
     base_dir: Path
     prompts_dir: Path
     discord_bot_token: str | None
+    superior_trade_api_key: str | None
+    superior_trade_api_url: str
+    backtest_registry_path: Path
     daily_post_channel_id: int | None
     dry_run: bool
     log_level: str
@@ -30,6 +33,8 @@ class AppConfig:
     daily_brief_minute: int
     ddgs_cli_path: str | None
     hyperliquid_info_url: str
+    backtest_poll_seconds: int
+    backtest_timeout_seconds: int
     config_file: Path | None
 
 
@@ -46,11 +51,15 @@ def load_config() -> AppConfig:
 
     channel_id_value = pick("DAILY_POST_CHANNEL_ID")
     channel_id = int(channel_id_value) if channel_id_value else None
+    registry_path_value = str(pick("BACKTEST_REGISTRY_PATH", str(base_dir / "data" / "backtest_registry.json")))
 
     return AppConfig(
         base_dir=base_dir,
         prompts_dir=base_dir / "prompts",
         discord_bot_token=pick("DISCORD_BOT_TOKEN"),
+        superior_trade_api_key=pick("SUPERIOR_TRADE_API_KEY"),
+        superior_trade_api_url=str(pick("SUPERIOR_TRADE_API_URL", "https://api.superior.trade")).rstrip("/"),
+        backtest_registry_path=Path(registry_path_value),
         daily_post_channel_id=channel_id,
         dry_run=_to_bool(pick("DRY_RUN", False), default=False),
         log_level=str(pick("LOG_LEVEL", "INFO")).upper(),
@@ -59,6 +68,8 @@ def load_config() -> AppConfig:
         daily_brief_minute=int(pick("DAILY_BRIEF_MINUTE", 0)),
         ddgs_cli_path=pick("DDGS_CLI_PATH"),
         hyperliquid_info_url=str(pick("HYPERLIQUID_INFO_URL", "https://api.hyperliquid.xyz/info")),
+        backtest_poll_seconds=int(pick("BACKTEST_POLL_SECONDS", 10)),
+        backtest_timeout_seconds=int(pick("BACKTEST_TIMEOUT_SECONDS", 900)),
         config_file=config_file,
     )
 
