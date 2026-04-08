@@ -51,6 +51,8 @@ def test_build_backtest_config_uses_signal_only_placeholders() -> None:
     assert config["exchange"]["pair_whitelist"] == ["XYZ-TSLA/USDC:USDC"]
     assert config["minimal_roi"] == {"0": 100.0}
     assert config["stoploss"] == -0.99
+    assert config["entry_pricing"] == {"price_side": "other"}
+    assert config["exit_pricing"] == {"price_side": "other"}
     assert config["margin_mode"] == "isolated"
 
 

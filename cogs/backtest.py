@@ -32,10 +32,8 @@ class BacktestCog(commands.Cog):
         except ConfigurationError:
             await interaction.followup.send(format_backtest_failure("Backtesting is not configured right now."))
             return
-        except SuperiorApiError:
-            await interaction.followup.send(
-                format_backtest_failure("Backtesting is temporarily unavailable right now. Please try again shortly.")
-            )
+        except SuperiorApiError as error:
+            await interaction.followup.send(format_backtest_failure(str(error)))
             return
 
         await interaction.followup.send(format_backtest_success(best))

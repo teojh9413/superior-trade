@@ -52,8 +52,8 @@ class SuperiorApiService:
             json_body={"config": config, "code": code, "timerange": timerange},
             allow_400=True,
         )
-        if payload.get("error"):
-            raise SuperiorApiError(payload.get("error", "unknown_error"))
+        if payload.get("error") or payload.get("message") or payload.get("details"):
+            raise SuperiorApiError(describe_error_payload(payload))
         return parse_backtest_record(payload)
 
     async def start_backtest(self, backtest_id: str) -> BacktestRecord:
@@ -124,8 +124,8 @@ class SuperiorApiService:
                     except json.JSONDecodeError:
                         return {"error": "bad_request", "message": text}
                 if response.status >= 400:
-                    LOGGER.warning("Superior API request failed %s %s: %s", method, path, text[:800])
-                    raise SuperiorApiError(extract_error_code(text))
+                    LOGGER.warning("Superior API request failed %s %s with status %s: %s", method, path, response.status, text)
+                    raise SuperiorApiError(extract_error_message(text))
                 if not text.strip():
                     return {}
                 return json.loads(text)
@@ -145,9 +145,38 @@ def parse_backtest_record(payload: dict[str, Any]) -> BacktestRecord:
     )
 
 
-def extract_error_code(text: str) -> str:
+def extract_error_message(text: str) -> str:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
         return "unknown_error"
-    return str(payload.get("error") or payload.get("message") or "unknown_error")
+    return describe_error_payload(payload)
+
+
+def describe_error_payload(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    error = payload.get("error")
+    message = payload.get("message")
+    details = payload.get("details")
+
+    if error:
+        parts.append(str(error))
+    if message and str(message) not in parts:
+        parts.append(str(message))
+
+    if isinstance(details, dict):
+        detail_items = []
+        for key, value in details.items():
+            detail_items.append(f"{key}: {value}")
+        if detail_items:
+            parts.append("; ".join(detail_items))
+    elif isinstance(details, list):
+        rendered = ", ".join(str(item) for item in details if item)
+        if rendered:
+            parts.append(rendered)
+    elif details:
+        parts.append(str(details))
+
+    if not parts:
+        return "unknown_error"
+    return " | ".join(parts)

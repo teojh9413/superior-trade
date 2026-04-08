@@ -149,6 +149,8 @@ def build_backtest_config(market: MarketInfo) -> dict[str, Any]:
         "max_open_trades": 1,
         "stoploss": -0.99,
         "minimal_roi": {"0": 100.0},
+        "entry_pricing": {"price_side": "other"},
+        "exit_pricing": {"price_side": "other"},
         "pairlists": [{"method": "StaticPairList"}],
     }
     if market.market_type == "perp":
