@@ -35,6 +35,7 @@ class AppConfig:
     hyperliquid_info_url: str
     backtest_poll_seconds: int
     backtest_timeout_seconds: int
+    backtest_data_lag_days: int
     config_file: Path | None
 
 
@@ -70,6 +71,7 @@ def load_config() -> AppConfig:
         hyperliquid_info_url=str(pick("HYPERLIQUID_INFO_URL", "https://api.hyperliquid.xyz/info")),
         backtest_poll_seconds=int(pick("BACKTEST_POLL_SECONDS", 10)),
         backtest_timeout_seconds=int(pick("BACKTEST_TIMEOUT_SECONDS", 900)),
+        backtest_data_lag_days=int(pick("BACKTEST_DATA_LAG_DAYS", 3)),
         config_file=config_file,
     )
 

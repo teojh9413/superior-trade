@@ -13,6 +13,7 @@ It only supports:
 
 - scheduled daily market brief posting
 - `/briefnow`
+- `/briefnews`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
 - `/health`
@@ -54,6 +55,7 @@ Optional:
 - `BACKTEST_REGISTRY_PATH`
 - `BACKTEST_POLL_SECONDS`
 - `BACKTEST_TIMEOUT_SECONDS`
+- `BACKTEST_DATA_LAG_DAYS`
 
 Reference:
 
@@ -63,6 +65,7 @@ Reference:
 
 - `/trade` only accepts a simple asset name.
 - `/backtest` only accepts a simple asset name.
+- `/briefnews` is a compatibility alias for `/briefnow`.
 - Invalid long natural-language `/trade` inputs must reply exactly:
 
 `My role is to suggest trading strategies, please use /trade + name of desired asset`
@@ -84,7 +87,8 @@ Reference:
 - `/backtest` must stay deterministic:
   - 7 fixed strategy templates in code
   - sequential execution
-  - cleanup of bot-owned backtests before and after runs
+  - delete existing backtests before starting a new run
+  - cleanup created backtests after the run
   - return only the best single result
 
 ## Data Sources
@@ -123,6 +127,7 @@ Store them in server environment variables or host secret storage only.
 5. Verify Discord commands:
    - `/health`
    - `/briefnow`
+   - `/briefnews`
    - `/trade btc`
    - `/backtest btc`
 6. Confirm the production `DAILY_POST_CHANNEL_ID`.
@@ -138,3 +143,4 @@ Store them in server environment variables or host secret storage only.
 - [`services/backtest_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/backtest_service.py)
 - [`services/superior_api_service.py`](/c:/Users/User/Desktop/superior-discord-bot/services/superior_api_service.py)
 - [`services/strategy_templates.py`](/c:/Users/User/Desktop/superior-discord-bot/services/strategy_templates.py)
+- [`reference/SKILL.md`](/c:/Users/User/Desktop/superior-discord-bot/reference/SKILL.md)

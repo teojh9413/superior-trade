@@ -52,7 +52,7 @@ class SuperiorApiService:
             json_body={"config": config, "code": code, "timerange": timerange},
             allow_400=True,
         )
-        if payload.get("error") or payload.get("message") or payload.get("details"):
+        if is_error_payload(payload):
             raise SuperiorApiError(describe_error_payload(payload))
         return parse_backtest_record(payload)
 
@@ -137,10 +137,10 @@ def parse_backtest_record(payload: dict[str, Any]) -> BacktestRecord:
         status=str(payload.get("status", "unknown")),
         config=payload.get("config"),
         code=payload.get("code"),
-        result_url=payload.get("result_url"),
-        created_at=payload.get("created_at"),
-        updated_at=payload.get("updated_at"),
-        completed_at=payload.get("completed_at"),
+        result_url=payload.get("result_url") or payload.get("resultUrl"),
+        created_at=payload.get("created_at") or payload.get("createdAt"),
+        updated_at=payload.get("updated_at") or payload.get("updatedAt"),
+        completed_at=payload.get("completed_at") or payload.get("completedAt"),
         results=payload.get("results") if isinstance(payload.get("results"), dict) else None,
     )
 
@@ -180,3 +180,11 @@ def describe_error_payload(payload: dict[str, Any]) -> str:
     if not parts:
         return "unknown_error"
     return " | ".join(parts)
+
+
+def is_error_payload(payload: dict[str, Any]) -> bool:
+    if payload.get("error"):
+        return True
+    if payload.get("id"):
+        return False
+    return bool(payload.get("message") or payload.get("details"))

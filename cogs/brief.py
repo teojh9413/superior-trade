@@ -13,6 +13,13 @@ class BriefCog(commands.Cog):
 
     @app_commands.command(name="briefnow", description="Generate the current 24-hour market brief.")
     async def briefnow(self, interaction: discord.Interaction) -> None:
+        await self._send_brief(interaction)
+
+    @app_commands.command(name="briefnews", description="Generate the current 24-hour market brief.")
+    async def briefnews(self, interaction: discord.Interaction) -> None:
+        await self._send_brief(interaction)
+
+    async def _send_brief(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(thinking=True)
         brief = await self.bot.services.news.generate_daily_brief()
         await interaction.followup.send(format_daily_brief(brief))

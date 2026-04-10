@@ -4,6 +4,7 @@ A focused Discord bot for:
 
 - daily market brief posting
 - `/briefnow`
+- `/briefnews`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
 - `/health`
@@ -15,7 +16,7 @@ This is not a knowledge-base bot and not a general chat bot.
 The bot now does only five things:
 
 1. Post a daily market brief at `3:00 PM` in the configured timezone.
-2. Generate the same brief on demand with `/briefnow`.
+2. Generate the same brief on demand with `/briefnow` or `/briefnews`.
 3. Suggest a practical strategy for a single asset with `/trade`.
 4. Run seven fixed backtests and return the single best result with `/backtest`.
 5. Show basic runtime status with `/health`.
@@ -32,8 +33,11 @@ Removed from scope:
 
 - `/health`
 - `/briefnow`
+- `/briefnews`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
+
+`/briefnews` is a compatibility alias for `/briefnow`.
 
 `/trade` only accepts a simple asset name such as:
 
@@ -110,12 +114,13 @@ It:
 - resolves the requested asset to an official Hyperliquid market
 - runs seven fixed long-only strategies sequentially on the same ticker
 - uses a 15m timeframe over the last 24 hours
+- uses the latest full 24-hour backtest window that is actually available from Superior.Trade data
 - compares completed runs by:
   - highest total profit %
   - higher Sharpe ratio on ties
   - higher win rate on ties
 - returns only the single best result
-- cleans up bot-created backtests after collecting results
+- clears existing backtests before starting and cleans up created backtests after collecting results
 
 The seven fixed strategies are:
 
@@ -174,6 +179,7 @@ Optional:
 - `BACKTEST_REGISTRY_PATH`
 - `BACKTEST_POLL_SECONDS`
 - `BACKTEST_TIMEOUT_SECONDS`
+- `BACKTEST_DATA_LAG_DAYS`
 
 Defaults:
 
@@ -182,6 +188,7 @@ Defaults:
 - `DAILY_BRIEF_MINUTE=0`
 - `HYPERLIQUID_INFO_URL=https://api.hyperliquid.xyz/info`
 - `SUPERIOR_TRADE_API_URL=https://api.superior.trade`
+- `BACKTEST_DATA_LAG_DAYS=3`
 
 ## Local Validation
 
@@ -214,4 +221,5 @@ pytest -q
 - `services/formatter.py`
 - `services/backtest_service.py`
 - `services/superior_api_service.py`
+- `reference/SKILL.md`
 - `.env.example`

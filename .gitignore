@@ -8,4 +8,5 @@ __pycache__/
 *.pyd
 *.log
 news_*.json
+data/
 config.local.json

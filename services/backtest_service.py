@@ -48,7 +48,7 @@ class BacktestService:
         if market is None:
             raise BacktestRunError(f"No official Hyperliquid market currently exists for {asset_name}.")
 
-        await self.cleanup_old_bot_backtests()
+        await self.cleanup_existing_backtests()
 
         created_ids: list[str] = []
         completed_stats: list[BacktestStats] = []
@@ -103,6 +103,20 @@ class BacktestService:
                 await self.superior_api_service.delete_backtest(backtest_id)
                 self.registry.remove(backtest_id)
 
+    async def cleanup_existing_backtests(self) -> None:
+        existing = await self.superior_api_service.list_backtests()
+        if not existing:
+            return
+
+        LOGGER.info("Deleting %s existing backtests before starting a new deterministic backtest run.", len(existing))
+        for record in existing:
+            try:
+                await self.superior_api_service.delete_backtest(record.backtest_id)
+            except SuperiorApiError:
+                LOGGER.warning("Failed to delete existing backtest %s during pre-run cleanup.", record.backtest_id)
+            finally:
+                self.registry.remove(record.backtest_id)
+
     async def cleanup_created_backtests(self, backtest_ids: list[str]) -> None:
         for backtest_id in backtest_ids:
             try:
@@ -118,12 +132,12 @@ class BacktestService:
                 return await self.superior_api_service.create_backtest(
                     config=build_backtest_config(market),
                     code=template.code,
-                    timerange=build_timerange(),
+                    timerange=build_timerange(lag_days=self.config.backtest_data_lag_days),
                 )
             except SuperiorApiError as error:
                 if "limit_exceeded" not in str(error) or attempt == 1:
                     raise
-                await self.cleanup_old_bot_backtests()
+                await self.cleanup_existing_backtests()
         raise BacktestRunError("Unable to create backtest after cleanup retry.")
 
     async def _run_and_collect(self, *, record: BacktestRecord) -> BacktestRecord:
@@ -165,19 +179,21 @@ def derive_stake_currency(pair: str) -> str:
     return pair.split("/", 1)[1].split(":", 1)[0]
 
 
-def build_timerange(now: datetime | None = None) -> dict[str, str]:
+def build_timerange(now: datetime | None = None, lag_days: int = 3) -> dict[str, str]:
     current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
-    start = (current - timedelta(hours=24)).date().isoformat()
-    end = current.date().isoformat()
+    end_date = current.date() - timedelta(days=lag_days)
+    start_date = end_date - timedelta(days=1)
+    start = start_date.isoformat()
+    end = end_date.isoformat()
     return {"start": start, "end": end}
 
 
 def extract_backtest_stats(results: dict[str, Any], strategy_name: str, ticker: str) -> BacktestStats:
     metrics = flatten_metrics(results)
     total_trades = int(first_number(metrics, ["total_trades", "trades", "total_closed_trades"], default=0))
-    win_rate_percent = first_percent(metrics, ["win_rate", "profit_factor_win_rate", "wins_pct"], default=0.0)
-    total_profit_percent = first_percent(metrics, ["total_profit_pct", "total_profit", "profit_total_pct"], default=0.0)
-    max_drawdown_percent = first_percent(metrics, ["max_drawdown", "max_drawdown_pct", "drawdown"], default=0.0)
+    win_rate_percent = first_percent(metrics, ["win_rate", "winrate", "profit_factor_win_rate", "wins_pct"], default=0.0)
+    total_profit_percent = first_percent(metrics, ["total_profit_pct", "total_profit", "profit_total_pct", "profit_total"], default=0.0)
+    max_drawdown_percent = first_percent(metrics, ["max_drawdown", "max_drawdown_pct", "max_drawdown_account", "drawdown"], default=0.0)
     sharpe_ratio = float(first_number(metrics, ["sharpe", "sharpe_ratio"], default=0.0))
     average_trade_duration = first_duration(metrics)
     return BacktestStats(
@@ -220,14 +236,37 @@ def first_number(metrics: dict[str, Any], keys: list[str], default: float) -> fl
 
 
 def first_percent(metrics: dict[str, Any], keys: list[str], default: float) -> float:
-    value = first_number(metrics, keys, default)
-    return value
+    for metric_key, value in metrics.items():
+        normalized = metric_key.lower()
+        if not any(key in normalized for key in keys):
+            continue
+        try:
+            if isinstance(value, str):
+                parsed = float(value.replace("%", "").strip())
+                has_percent_symbol = "%" in value
+            else:
+                parsed = float(value)
+                has_percent_symbol = False
+        except (TypeError, ValueError):
+            continue
+
+        if "pct" in normalized or has_percent_symbol:
+            return parsed
+        if abs(parsed) <= 1.0 and any(token in normalized for token in ("profit", "drawdown", "winrate", "win_rate")):
+            return parsed * 100.0
+        return parsed
+    return default
 
 
 def first_duration(metrics: dict[str, Any]) -> str:
     for metric_key, value in metrics.items():
         normalized = metric_key.lower()
-        if "avg_duration" in normalized or "average_duration" in normalized or "trade_duration" in normalized:
+        if (
+            "avg_duration" in normalized
+            or "average_duration" in normalized
+            or "trade_duration" in normalized
+            or "duration_avg" in normalized
+        ):
             return str(value)
     return "n/a"
 
