@@ -3,8 +3,7 @@
 A focused Discord bot for:
 
 - daily market brief posting
-- `/briefnow`
-- `/briefnews`
+- `/dailybrief`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
 - `/health`
@@ -16,7 +15,7 @@ This is not a knowledge-base bot and not a general chat bot.
 The bot now does only five things:
 
 1. Post a daily market brief at `3:00 PM` in the configured timezone.
-2. Generate the same brief on demand with `/briefnow` or `/briefnews`.
+2. Generate the same brief on demand with `/dailybrief`.
 3. Suggest a practical strategy for a single asset with `/trade`.
 4. Run seven fixed backtests and return the single best result with `/backtest`.
 5. Show basic runtime status with `/health`.
@@ -31,13 +30,10 @@ Removed from scope:
 
 ## Commands
 
+- `/dailybrief`
 - `/health`
-- `/briefnow`
-- `/briefnews`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
-
-`/briefnews` is a compatibility alias for `/briefnow`.
 
 `/trade` only accepts a simple asset name such as:
 

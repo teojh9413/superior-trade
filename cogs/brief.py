@@ -11,12 +11,8 @@ class BriefCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="briefnow", description="Generate the current 24-hour market brief.")
-    async def briefnow(self, interaction: discord.Interaction) -> None:
-        await self._send_brief(interaction)
-
-    @app_commands.command(name="briefnews", description="Generate the current 24-hour market brief.")
-    async def briefnews(self, interaction: discord.Interaction) -> None:
+    @app_commands.command(name="dailybrief", description="Generate the current 24-hour market brief.")
+    async def dailybrief(self, interaction: discord.Interaction) -> None:
         await self._send_brief(interaction)
 
     async def _send_brief(self, interaction: discord.Interaction) -> None:

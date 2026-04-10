@@ -12,8 +12,7 @@ This bot is narrowly scoped.
 It only supports:
 
 - scheduled daily market brief posting
-- `/briefnow`
-- `/briefnews`
+- `/dailybrief`
 - `/trade <asset_name>`
 - `/backtest <asset_name>`
 - `/health`
@@ -65,7 +64,7 @@ Reference:
 
 - `/trade` only accepts a simple asset name.
 - `/backtest` only accepts a simple asset name.
-- `/briefnews` is a compatibility alias for `/briefnow`.
+- `/dailybrief` is the only on-demand brief command.
 - Invalid long natural-language `/trade` inputs must reply exactly:
 
 `My role is to suggest trading strategies, please use /trade + name of desired asset`
@@ -126,8 +125,7 @@ Store them in server environment variables or host secret storage only.
 4. Start `python bot.py`.
 5. Verify Discord commands:
    - `/health`
-   - `/briefnow`
-   - `/briefnews`
+   - `/dailybrief`
    - `/trade btc`
    - `/backtest btc`
 6. Confirm the production `DAILY_POST_CHANNEL_ID`.
