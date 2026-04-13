@@ -30,6 +30,44 @@ class FakeSuperiorApiService:
         self.deleted.append(backtest_id)
 
 
+class ProbeApiService(FakeSuperiorApiService):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.created: list[dict[str, str]] = []
+        self.status_by_id: dict[str, str] = {}
+        self.results_by_id: dict[str, dict] = {}
+        self._counter = 0
+
+    async def create_backtest(self, *, config, code, timerange):
+        self._counter += 1
+        backtest_id = f"id-{self._counter}"
+        self.created.append(timerange)
+        if timerange["end"] == "2026-04-08":
+            self.status_by_id[backtest_id] = "completed"
+            self.results_by_id[backtest_id] = {
+                "total_trades": 1,
+                "winrate": 1.0,
+                "profit_total": 0.05,
+                "max_drawdown_account": 0.0,
+                "sharpe": 1.0,
+                "duration_avg": "0:15:00",
+            }
+        else:
+            self.status_by_id[backtest_id] = "failed"
+            self.results_by_id[backtest_id] = {}
+        return BacktestRecord(backtest_id, "pending")
+
+    async def start_backtest(self, backtest_id: str):
+        return BacktestRecord(backtest_id, "running")
+
+    async def get_backtest_status(self, backtest_id: str):
+        return BacktestRecord(backtest_id, self.status_by_id[backtest_id])
+
+    async def get_backtest_details(self, backtest_id: str):
+        results = self.results_by_id[backtest_id] if self.status_by_id[backtest_id] == "completed" else None
+        return BacktestRecord(backtest_id, self.status_by_id[backtest_id], results=results)
+
+
 def test_rank_backtest_results_uses_profit_then_sharpe_then_win_rate() -> None:
     ranked = rank_backtest_results(
         [
@@ -121,6 +159,21 @@ def test_build_timerange_supports_custom_lag_days() -> None:
     assert timerange == {"start": "2026-04-07", "end": "2026-04-08"}
 
 
+def test_run_best_backtest_for_asset_steps_back_until_a_window_yields_completed_results(tmp_path: Path) -> None:
+    service = BacktestService(
+        config=build_test_config(tmp_path),
+        hyperliquid_service=FakeHyperliquidService(),
+        superior_api_service=ProbeApiService(),
+        registry=BacktestRegistry(tmp_path / "registry.json"),
+    )
+
+    market, stats = asyncio.run(service.run_best_backtest_for_asset("btc"))
+
+    assert market.ticker == "BTC"
+    assert stats.strategy_name == "MACD"
+    assert round(stats.total_profit_percent, 2) == 5.0
+
+
 def test_extract_backtest_stats_handles_freqtrade_style_fractional_metrics() -> None:
     from services.backtest_service import extract_backtest_stats
 
@@ -149,6 +202,10 @@ def build_test_config(tmp_path: Path) -> AppConfig:
         base_dir=tmp_path,
         prompts_dir=tmp_path / "prompts",
         discord_bot_token=None,
+        deepseek_api_key=None,
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_model="deepseek-chat",
+        deepseek_timeout_seconds=45,
         superior_trade_api_key="test-key",
         superior_trade_api_url="https://api.superior.trade",
         backtest_registry_path=tmp_path / "registry.json",
@@ -163,5 +220,6 @@ def build_test_config(tmp_path: Path) -> AppConfig:
         backtest_poll_seconds=1,
         backtest_timeout_seconds=30,
         backtest_data_lag_days=3,
+        backtest_max_additional_lag_days=5,
         config_file=None,
     )

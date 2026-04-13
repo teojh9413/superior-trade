@@ -22,6 +22,10 @@ class AppConfig:
     base_dir: Path
     prompts_dir: Path
     discord_bot_token: str | None
+    deepseek_api_key: str | None
+    deepseek_base_url: str
+    deepseek_model: str
+    deepseek_timeout_seconds: int
     superior_trade_api_key: str | None
     superior_trade_api_url: str
     backtest_registry_path: Path
@@ -36,6 +40,7 @@ class AppConfig:
     backtest_poll_seconds: int
     backtest_timeout_seconds: int
     backtest_data_lag_days: int
+    backtest_max_additional_lag_days: int
     config_file: Path | None
 
 
@@ -58,6 +63,12 @@ def load_config() -> AppConfig:
         base_dir=base_dir,
         prompts_dir=base_dir / "prompts",
         discord_bot_token=pick("DISCORD_BOT_TOKEN"),
+        deepseek_api_key=pick("DEEPSEEK_API_KEY") or pick("LLM_API_KEY"),
+        deepseek_base_url=str(
+            pick("DEEPSEEK_BASE_URL", pick("LLM_BASE_URL", "https://api.deepseek.com"))
+        ).rstrip("/"),
+        deepseek_model=str(pick("DEEPSEEK_MODEL", pick("LLM_MODEL", "deepseek-chat"))),
+        deepseek_timeout_seconds=int(pick("DEEPSEEK_TIMEOUT_SECONDS", pick("LLM_TIMEOUT_SECONDS", 45))),
         superior_trade_api_key=pick("SUPERIOR_TRADE_API_KEY"),
         superior_trade_api_url=str(pick("SUPERIOR_TRADE_API_URL", "https://api.superior.trade")).rstrip("/"),
         backtest_registry_path=Path(registry_path_value),
@@ -72,6 +83,7 @@ def load_config() -> AppConfig:
         backtest_poll_seconds=int(pick("BACKTEST_POLL_SECONDS", 10)),
         backtest_timeout_seconds=int(pick("BACKTEST_TIMEOUT_SECONDS", 900)),
         backtest_data_lag_days=int(pick("BACKTEST_DATA_LAG_DAYS", 3)),
+        backtest_max_additional_lag_days=int(pick("BACKTEST_MAX_ADDITIONAL_LAG_DAYS", 5)),
         config_file=config_file,
     )
 

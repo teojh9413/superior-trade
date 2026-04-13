@@ -1,4 +1,9 @@
-from services.superior_api_service import describe_error_payload, is_error_payload, parse_backtest_record
+from services.superior_api_service import (
+    describe_error_payload,
+    extract_error_message,
+    is_error_payload,
+    parse_backtest_record,
+)
 
 
 def test_describe_error_payload_includes_error_message_and_details() -> None:
@@ -42,3 +47,13 @@ def test_parse_backtest_record_accepts_camel_case_fields() -> None:
     assert record.created_at == "2026-04-10T00:00:00Z"
     assert record.updated_at == "2026-04-10T00:01:00Z"
     assert record.completed_at == "2026-04-10T00:02:00Z"
+
+
+def test_extract_error_message_includes_status_for_non_json_error() -> None:
+    message = extract_error_message(
+        "<html><title>502 Server Error</title><body>Please try again in 30 seconds.</body></html>",
+        status=502,
+    )
+
+    assert message.startswith("HTTP 502:")
+    assert "Please try again in 30 seconds." in message

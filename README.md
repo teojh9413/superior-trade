@@ -88,6 +88,8 @@ The brief contains:
 - concise summary
 - three short strategy prompts
 
+When `DEEPSEEK_API_KEY` is configured, the summaries and strategy prompts are generated through DeepSeek using the local prompt files. If DeepSeek is unavailable, the bot falls back to deterministic local formatting so the command still responds.
+
 ## Hyperliquid Ticker Validation
 
 `/trade`, `/backtest`, and the brief prompts validate markets using the official Hyperliquid `info` endpoint.
@@ -101,6 +103,17 @@ The bot:
 
 If no valid Hyperliquid market exists, the bot says so clearly.
 
+## Trade Generation
+
+`/trade` resolves the official Hyperliquid ticker first, then uses DeepSeek to generate the strategy response when `DEEPSEEK_API_KEY` is configured.
+
+The bot:
+
+- sends the official ticker and market context to DeepSeek
+- keeps the frontend response in the required Superior.Trade format
+- does not expose internal mapping language to users
+- falls back to deterministic local strategy construction only if DeepSeek is unavailable
+
 ## Deterministic Backtests
 
 `/backtest` is deterministic and does not ask an LLM to invent strategy logic.
@@ -110,7 +123,7 @@ It:
 - resolves the requested asset to an official Hyperliquid market
 - runs seven fixed long-only strategies sequentially on the same ticker
 - uses a 15m timeframe over the last 24 hours
-- uses the latest full 24-hour backtest window that is actually available from Superior.Trade data
+- probes the newest likely backtest window first and automatically steps further back until Superior.Trade data is actually available
 - compares completed runs by:
   - highest total profit %
   - higher Sharpe ratio on ties
@@ -157,6 +170,7 @@ Required:
 
 - `DISCORD_BOT_TOKEN`
 - `DAILY_POST_CHANNEL_ID`
+- `DEEPSEEK_API_KEY` for live DeepSeek-generated `/trade` and brief text
 - `SUPERIOR_TRADE_API_KEY` for `/backtest`
 
 Runtime:
@@ -169,6 +183,9 @@ Runtime:
 
 Optional:
 
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
+- `DEEPSEEK_TIMEOUT_SECONDS`
 - `DDGS_CLI_PATH`
 - `HYPERLIQUID_INFO_URL`
 - `SUPERIOR_TRADE_API_URL`
@@ -176,15 +193,19 @@ Optional:
 - `BACKTEST_POLL_SECONDS`
 - `BACKTEST_TIMEOUT_SECONDS`
 - `BACKTEST_DATA_LAG_DAYS`
+- `BACKTEST_MAX_ADDITIONAL_LAG_DAYS`
 
 Defaults:
 
 - `TIMEZONE=Asia/Singapore`
 - `DAILY_BRIEF_HOUR=15`
 - `DAILY_BRIEF_MINUTE=0`
+- `DEEPSEEK_BASE_URL=https://api.deepseek.com`
+- `DEEPSEEK_MODEL=deepseek-chat`
 - `HYPERLIQUID_INFO_URL=https://api.hyperliquid.xyz/info`
 - `SUPERIOR_TRADE_API_URL=https://api.superior.trade`
 - `BACKTEST_DATA_LAG_DAYS=3`
+- `BACKTEST_MAX_ADDITIONAL_LAG_DAYS=5`
 
 ## Local Validation
 
@@ -206,6 +227,7 @@ pytest -q
 - It should run on a process/worker host or server.
 - It should not be deployed to static website hosting.
 - The DDGS CLI must be available in the runtime environment, either on `PATH` or via `DDGS_CLI_PATH`.
+- `DEEPSEEK_API_KEY` is required if you want live DeepSeek-generated `/trade` and brief output.
 - `/backtest` requires a valid `SUPERIOR_TRADE_API_KEY`.
 
 ## Files To Check First

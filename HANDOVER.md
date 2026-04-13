@@ -36,6 +36,7 @@ pytest -q
 
 - `DISCORD_BOT_TOKEN`
 - `DAILY_POST_CHANNEL_ID`
+- `DEEPSEEK_API_KEY`
 - `SUPERIOR_TRADE_API_KEY`
 
 Recommended runtime values:
@@ -48,6 +49,9 @@ Recommended runtime values:
 
 Optional:
 
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
+- `DEEPSEEK_TIMEOUT_SECONDS`
 - `DDGS_CLI_PATH`
 - `HYPERLIQUID_INFO_URL`
 - `SUPERIOR_TRADE_API_URL`
@@ -55,6 +59,7 @@ Optional:
 - `BACKTEST_POLL_SECONDS`
 - `BACKTEST_TIMEOUT_SECONDS`
 - `BACKTEST_DATA_LAG_DAYS`
+- `BACKTEST_MAX_ADDITIONAL_LAG_DAYS`
 
 Reference:
 
@@ -95,6 +100,11 @@ Reference:
 News:
 
 - DDGS CLI news search via subprocess
+- DeepSeek for final brief summaries and strategy prompts when configured
+
+Trade generation:
+
+- DeepSeek using the official resolved Hyperliquid ticker when configured
 
 Ticker discovery:
 
@@ -108,6 +118,7 @@ Backtesting:
 
 - This is a worker/process app, not a web app.
 - The runtime must have the DDGS CLI available.
+- The runtime should provide `DEEPSEEK_API_KEY` for live `/trade` and brief generation.
 - `/backtest` requires a valid `SUPERIOR_TRADE_API_KEY`.
 - Do not deploy to static/shared website hosting.
 

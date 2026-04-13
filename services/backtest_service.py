@@ -49,44 +49,24 @@ class BacktestService:
             raise BacktestRunError(f"No official Hyperliquid market currently exists for {asset_name}.")
 
         await self.cleanup_existing_backtests()
+        max_lag = self.config.backtest_data_lag_days + self.config.backtest_max_additional_lag_days
+        failure_notes: list[str] = []
+        for lag_days in range(self.config.backtest_data_lag_days, max_lag + 1):
+            timerange = build_timerange(lag_days=lag_days)
+            completed_stats, failure_note = await self._run_backtests_for_timerange(market=market, timerange=timerange)
+            if completed_stats:
+                if all(result.total_trades == 0 for result in completed_stats):
+                    failure_notes.append(f"{timerange['start']}->{timerange['end']}: no_trades")
+                    continue
+                best = rank_backtest_results(completed_stats)[0]
+                LOGGER.info("Using backtest timerange %s for %s.", timerange, market.ticker)
+                return market, best
+            failure_notes.append(failure_note or f"{timerange['start']}->{timerange['end']}: all_failed")
 
-        created_ids: list[str] = []
-        completed_stats: list[BacktestStats] = []
-        try:
-            for template in self.templates:
-                record = await self._create_backtest_with_retry(template=template, market=market)
-                created_ids.append(record.backtest_id)
-                self.registry.upsert(
-                    RegistryEntry(
-                        backtest_id=record.backtest_id,
-                        strategy_name=template.name,
-                        ticker=market.ticker,
-                        created_at=datetime.now(timezone.utc).isoformat(),
-                        status=record.status,
-                    )
-                )
-                details = await self._run_and_collect(record=record)
-                self.registry.upsert(
-                    RegistryEntry(
-                        backtest_id=record.backtest_id,
-                        strategy_name=template.name,
-                        ticker=market.ticker,
-                        created_at=datetime.now(timezone.utc).isoformat(),
-                        status=details.status,
-                    )
-                )
-                if details.status == "completed" and details.results:
-                    completed_stats.append(extract_backtest_stats(details.results, template.name, market.ticker))
-        finally:
-            await self.cleanup_created_backtests(created_ids)
-
-        if not completed_stats:
-            raise BacktestRunError("All seven backtests failed.")
-        if all(result.total_trades == 0 for result in completed_stats):
-            raise BacktestRunError("No valid trades were generated over the last 24 hours.")
-
-        best = rank_backtest_results(completed_stats)[0]
-        return market, best
+        raise BacktestRunError(
+            "No working backtest data window was found. "
+            + "; ".join(failure_notes[-3:])
+        )
 
     async def cleanup_old_bot_backtests(self) -> None:
         registry_entries = {entry.backtest_id: entry for entry in self.registry.list_entries()}
@@ -126,18 +106,77 @@ class BacktestService:
             finally:
                 self.registry.remove(backtest_id)
 
-    async def _create_backtest_with_retry(self, *, template: StrategyTemplate, market: MarketInfo) -> BacktestRecord:
-        for attempt in range(2):
+    async def _run_backtests_for_timerange(
+        self,
+        *,
+        market: MarketInfo,
+        timerange: dict[str, str],
+    ) -> tuple[list[BacktestStats], str | None]:
+        created_ids: list[str] = []
+        completed_stats: list[BacktestStats] = []
+        failure_messages: list[str] = []
+        try:
+            for template in self.templates:
+                try:
+                    record = await self._create_backtest_with_retry(template=template, market=market, timerange=timerange)
+                    created_ids.append(record.backtest_id)
+                    self.registry.upsert(
+                        RegistryEntry(
+                            backtest_id=record.backtest_id,
+                            strategy_name=template.name,
+                            ticker=market.ticker,
+                            created_at=datetime.now(timezone.utc).isoformat(),
+                            status=record.status,
+                        )
+                    )
+                    details = await self._run_and_collect(record=record)
+                    self.registry.upsert(
+                        RegistryEntry(
+                            backtest_id=record.backtest_id,
+                            strategy_name=template.name,
+                            ticker=market.ticker,
+                            created_at=datetime.now(timezone.utc).isoformat(),
+                            status=details.status,
+                        )
+                    )
+                    if details.status == "completed" and details.results:
+                        completed_stats.append(extract_backtest_stats(details.results, template.name, market.ticker))
+                    else:
+                        failure_messages.append(f"{template.name}: {details.status}")
+                except (BacktestRunError, SuperiorApiError) as error:
+                    failure_messages.append(f"{template.name}: {error}")
+        finally:
+            await self.cleanup_created_backtests(created_ids)
+
+        if completed_stats:
+            return completed_stats, None
+        return completed_stats, f"{timerange['start']}->{timerange['end']}: " + ", ".join(failure_messages[:3])
+
+    async def _create_backtest_with_retry(
+        self,
+        *,
+        template: StrategyTemplate,
+        market: MarketInfo,
+        timerange: dict[str, str],
+    ) -> BacktestRecord:
+        for attempt in range(3):
             try:
                 return await self.superior_api_service.create_backtest(
                     config=build_backtest_config(market),
                     code=template.code,
-                    timerange=build_timerange(lag_days=self.config.backtest_data_lag_days),
+                    timerange=timerange,
                 )
             except SuperiorApiError as error:
-                if "limit_exceeded" not in str(error) or attempt == 1:
+                message = str(error).lower()
+                if "limit_exceeded" in message and attempt < 2:
+                    await self.cleanup_existing_backtests()
+                    continue
+                if any(token in message for token in ("http 502", "http 503", "http 504", "http 429")) and attempt < 2:
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                if attempt == 2:
                     raise
-                await self.cleanup_existing_backtests()
+                raise
         raise BacktestRunError("Unable to create backtest after cleanup retry.")
 
     async def _run_and_collect(self, *, record: BacktestRecord) -> BacktestRecord:

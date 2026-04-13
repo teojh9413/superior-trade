@@ -28,7 +28,7 @@ class TradeCog(commands.Cog):
             await interaction.followup.send(format_trade_asset_not_found(trimmed))
             return
 
-        strategy = self.bot.services.prompt.build_trade_strategy(market)
+        strategy = await self.bot.services.prompt.generate_trade_strategy(market)
         await interaction.followup.send(format_trade_response(strategy))
 
 

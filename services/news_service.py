@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from core.config import AppConfig
 from services.hyperliquid_service import HyperliquidService, MarketInfo
-from services.prompt_service import PromptService
+from services.prompt_service import BriefContent, PromptService
 
 LOGGER = logging.getLogger(__name__)
 
@@ -137,13 +137,29 @@ class NewsService:
         if len(selected) != 3:
             raise RuntimeError("Unable to build a complete 24-hour brief with 2 crypto and 1 tradfi headlines.")
 
-        prompts = [
-            self.prompt_service.build_brief_prompt(article.market, article.title, article.summary)
-            for article in selected
-        ]
+        rendered_items: list[NewsArticle] = []
+        prompts: list[str] = []
+        for article in selected:
+            brief_content = await self.prompt_service.generate_brief_content(
+                article.market,
+                article.title,
+                article.summary,
+            )
+            rendered_items.append(
+                NewsArticle(
+                    title=article.title,
+                    source=article.source,
+                    published_at=article.published_at,
+                    summary=brief_content.summary,
+                    url=article.url,
+                    category=article.category,
+                    market=article.market,
+                )
+            )
+            prompts.append(brief_content.prompt)
         return DailyBrief(
             generated_at_label=current.strftime("%d %b %Y, GMT+8"),
-            items=selected,
+            items=rendered_items,
             prompts=prompts,
         )
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -125,7 +127,7 @@ class SuperiorApiService:
                         return {"error": "bad_request", "message": text}
                 if response.status >= 400:
                     LOGGER.warning("Superior API request failed %s %s with status %s: %s", method, path, response.status, text)
-                    raise SuperiorApiError(extract_error_message(text))
+                    raise SuperiorApiError(extract_error_message(text, status=response.status))
                 if not text.strip():
                     return {}
                 return json.loads(text)
@@ -145,12 +147,32 @@ def parse_backtest_record(payload: dict[str, Any]) -> BacktestRecord:
     )
 
 
-def extract_error_message(text: str) -> str:
+def extract_error_message(text: str, status: int | None = None) -> str:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        return "unknown_error"
+        return describe_http_error(status=status, text=text)
     return describe_error_payload(payload)
+
+
+def describe_http_error(*, status: int | None, text: str) -> str:
+    cleaned = summarize_error_text(text)
+    status_label = f"HTTP {status}" if status is not None else "HTTP error"
+    if cleaned:
+        return f"{status_label}: {cleaned}"
+    return status_label
+
+
+def summarize_error_text(text: str) -> str:
+    if not text.strip():
+        return ""
+    without_tags = re.sub(r"<[^>]+>", " ", text)
+    normalized = html.unescape(re.sub(r"\s+", " ", without_tags)).strip()
+    if not normalized:
+        return ""
+    if len(normalized) <= 220:
+        return normalized
+    return normalized[:217].rstrip() + "..."
 
 
 def describe_error_payload(payload: dict[str, Any]) -> str:

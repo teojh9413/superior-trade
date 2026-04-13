@@ -137,6 +137,7 @@ async def run_dry_mode(config: AppConfig, services: ServiceContainer) -> None:
     LOGGER.info("Dry-run mode enabled. No Discord connection will be made.")
     LOGGER.info("DDGS CLI resolved to: %s", config.ddgs_cli_path or "auto")
     LOGGER.info("Scheduler configured for %s.", f"{config.daily_brief_hour:02d}:{config.daily_brief_minute:02d} {config.timezone}")
+    LOGGER.info("DeepSeek configured: %s", "yes" if services.prompt.is_configured() else "no")
     LOGGER.info("Superior Trade API configured: %s", "yes" if config.superior_trade_api_key else "no")
     bot = SuperiorTradeBot(config=config, services=services)
     await bot.setup_hook()
