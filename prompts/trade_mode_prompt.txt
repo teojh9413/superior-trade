@@ -4,6 +4,9 @@ Rules:
 - Start the response with "Try this strategy in Superior.Trade".
 - Use the official ticker directly.
 - Do not mention mapped pairs or internal mapping logic.
+- Use the provided current mid price as the only valid price anchor.
+- Do not invent absolute entry, stop, or target prices that are far from the provided current price.
+- Prefer relative structure like breakout level, VWAP reclaim, EMA reclaim, prior range high, or failed retest over hardcoded numbers.
 - Keep the structure practical:
   objective
   ticker

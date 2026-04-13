@@ -64,7 +64,7 @@ class PromptService:
             backtest_reminder="Backtest this ticker on recent Hyperliquid data in Superior.Trade before deploying live.",
         )
 
-    async def generate_trade_strategy(self, market: MarketInfo) -> TradeStrategy:
+    async def generate_trade_strategy(self, market: MarketInfo, current_price: float | None = None) -> TradeStrategy:
         fallback = self.build_trade_strategy(market)
         if not self.is_configured():
             return fallback
@@ -73,6 +73,7 @@ class PromptService:
 Official ticker: {market.ticker}
 Market type: {market.market_type}
 Official pair: {market.pair}
+Current mid price: {format_price(current_price) if current_price is not None else "unknown"}
 
 Return strict JSON with keys:
 - objective
@@ -88,7 +89,7 @@ Return strict JSON with keys:
             return fallback
 
         direction = normalize_direction(str(payload.get("direction") or fallback.direction))
-        return TradeStrategy(
+        candidate = TradeStrategy(
             asset=market.ticker,
             suggested_bias=direction,
             objective=clean_sentence(str(payload.get("objective") or fallback.objective), limit=220),
@@ -100,6 +101,7 @@ Return strict JSON with keys:
             risk_management=clean_sentence(str(payload.get("risk_management") or fallback.risk_management), limit=320),
             backtest_reminder=clean_sentence(str(payload.get("backtest_reminder") or fallback.backtest_reminder), limit=220),
         )
+        return sanitize_trade_strategy(candidate, fallback=fallback, current_price=current_price)
 
     async def generate_brief_content(self, market: MarketInfo, headline: str, raw_summary: str) -> BriefContent:
         fallback_summary = compact_text(raw_summary, limit=170)
@@ -270,3 +272,53 @@ def clean_prompt(text: str, *, market: MarketInfo, fallback: str) -> str:
     if "when " not in compact.lower():
         return fallback
     return compact
+
+
+def sanitize_trade_strategy(
+    strategy: TradeStrategy,
+    *,
+    fallback: TradeStrategy,
+    current_price: float | None,
+) -> TradeStrategy:
+    if current_price is None:
+        return remove_absolute_price_levels(strategy, fallback=fallback)
+
+    numbers = extract_price_like_numbers(f"{strategy.entry_logic} {strategy.exit_logic} {strategy.risk_management}")
+    if any(number <= 0 for number in numbers):
+        return remove_absolute_price_levels(strategy, fallback=fallback)
+    if any(number > current_price * 5 or number < current_price / 5 for number in numbers):
+        return remove_absolute_price_levels(strategy, fallback=fallback)
+    return strategy
+
+
+def remove_absolute_price_levels(strategy: TradeStrategy, *, fallback: TradeStrategy) -> TradeStrategy:
+    return TradeStrategy(
+        asset=strategy.asset,
+        suggested_bias=strategy.suggested_bias,
+        objective=strategy.objective,
+        ticker=strategy.ticker,
+        timeframe=strategy.timeframe,
+        direction=strategy.direction,
+        entry_logic=fallback.entry_logic,
+        exit_logic=fallback.exit_logic,
+        risk_management=fallback.risk_management,
+        backtest_reminder=strategy.backtest_reminder,
+    )
+
+
+def extract_price_like_numbers(text: str) -> list[float]:
+    values: list[float] = []
+    for match in re.finditer(r"(?<![A-Za-z0-9])\$?(\d+(?:\.\d+)?)", text):
+        try:
+            values.append(float(match.group(1)))
+        except ValueError:
+            continue
+    return values
+
+
+def format_price(value: float) -> str:
+    if value >= 100:
+        return f"{value:.2f}"
+    if value >= 1:
+        return f"{value:.4f}"
+    return f"{value:.6f}"

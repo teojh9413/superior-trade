@@ -42,11 +42,25 @@ class BacktestRegistry:
                 return entry
         return None
 
+    def get_state_value(self, key: str, default: Any = None) -> Any:
+        payload = self._read()
+        return payload.get("state", {}).get(key, default)
+
+    def set_state_value(self, key: str, value: Any) -> None:
+        payload = self._read()
+        state = payload.get("state", {})
+        state[key] = value
+        payload["state"] = state
+        self._write(payload)
+
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"entries": []}
+            return {"entries": [], "state": {}}
         with self.path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+            payload = json.load(handle)
+        payload.setdefault("entries", [])
+        payload.setdefault("state", {})
+        return payload
 
     def _write(self, payload: dict[str, Any]) -> None:
         with self.path.open("w", encoding="utf-8") as handle:

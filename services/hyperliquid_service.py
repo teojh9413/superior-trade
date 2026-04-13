@@ -77,6 +77,8 @@ class HyperliquidService:
         self.config = config
         self._markets_cache: list[MarketInfo] = []
         self._markets_cache_time: datetime | None = None
+        self._mids_cache: dict[str, str] = {}
+        self._mids_cache_time: datetime | None = None
 
     async def resolve_asset(self, asset_name: str) -> MarketInfo | None:
         markets = await self._get_markets()
@@ -170,6 +172,16 @@ class HyperliquidService:
     async def market_count(self) -> int:
         return len(await self._get_markets())
 
+    async def get_mid_price(self, ticker: str) -> float | None:
+        mids = await self._get_mids()
+        raw = mids.get(ticker)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
     async def _get_markets(self) -> list[MarketInfo]:
         now = datetime.now(timezone.utc)
         if self._markets_cache and self._markets_cache_time and now - self._markets_cache_time < timedelta(minutes=10):
@@ -186,6 +198,21 @@ class HyperliquidService:
         self._markets_cache_time = now
         LOGGER.info("Loaded %s official Hyperliquid markets.", len(markets))
         return markets
+
+    async def _get_mids(self) -> dict[str, str]:
+        now = datetime.now(timezone.utc)
+        if self._mids_cache and self._mids_cache_time and now - self._mids_cache_time < timedelta(seconds=30):
+            return self._mids_cache
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(self.config.hyperliquid_info_url, json={"type": "allMids"}) as response:
+                response.raise_for_status()
+                payload = await response.json()
+
+        mids = payload if isinstance(payload, dict) else {}
+        self._mids_cache = mids
+        self._mids_cache_time = now
+        return mids
 
 
 async def fetch_market_payloads(*, session: aiohttp.ClientSession, info_url: str) -> tuple[list[dict], dict]:

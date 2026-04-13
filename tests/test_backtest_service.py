@@ -174,6 +174,41 @@ def test_run_best_backtest_for_asset_steps_back_until_a_window_yields_completed_
     assert round(stats.total_profit_percent, 2) == 5.0
 
 
+def test_candidate_lag_days_prefers_recent_cached_success(tmp_path: Path) -> None:
+    registry = BacktestRegistry(tmp_path / "registry.json")
+    registry.set_state_value(
+        "successful_lag_cache",
+        {
+            "lag_days": 5,
+            "resolved_at": "2026-04-13T08:00:00+00:00",
+        },
+    )
+    service = BacktestService(
+        config=build_test_config(tmp_path),
+        hyperliquid_service=FakeHyperliquidService(),
+        superior_api_service=ProbeApiService(),
+        registry=registry,
+    )
+
+    from services.backtest_service import datetime, timezone
+
+    original_datetime = datetime
+    try:
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return original_datetime(2026, 4, 13, 8, 10, tzinfo=timezone.utc)
+
+        import services.backtest_service as module
+
+        module.datetime = FrozenDateTime
+        assert service._candidate_lag_days(max_lag=8) == [5, 6, 7, 8]
+    finally:
+        import services.backtest_service as module
+
+        module.datetime = original_datetime
+
+
 def test_extract_backtest_stats_handles_freqtrade_style_fractional_metrics() -> None:
     from services.backtest_service import extract_backtest_stats
 
@@ -221,5 +256,6 @@ def build_test_config(tmp_path: Path) -> AppConfig:
         backtest_timeout_seconds=30,
         backtest_data_lag_days=3,
         backtest_max_additional_lag_days=5,
+        backtest_window_cache_minutes=30,
         config_file=None,
     )

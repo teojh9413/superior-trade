@@ -14,6 +14,7 @@ from services.strategy_templates import StrategyTemplate, get_strategy_templates
 from services.superior_api_service import BacktestRecord, SuperiorApiService
 
 LOGGER = logging.getLogger(__name__)
+WINDOW_CACHE_STATE_KEY = "successful_lag_cache"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +52,7 @@ class BacktestService:
         await self.cleanup_existing_backtests()
         max_lag = self.config.backtest_data_lag_days + self.config.backtest_max_additional_lag_days
         failure_notes: list[str] = []
-        for lag_days in range(self.config.backtest_data_lag_days, max_lag + 1):
+        for lag_days in self._candidate_lag_days(max_lag=max_lag):
             timerange = build_timerange(lag_days=lag_days)
             completed_stats, failure_note = await self._run_backtests_for_timerange(market=market, timerange=timerange)
             if completed_stats:
@@ -59,6 +60,7 @@ class BacktestService:
                     failure_notes.append(f"{timerange['start']}->{timerange['end']}: no_trades")
                     continue
                 best = rank_backtest_results(completed_stats)[0]
+                self._store_successful_lag(lag_days)
                 LOGGER.info("Using backtest timerange %s for %s.", timerange, market.ticker)
                 return market, best
             failure_notes.append(failure_note or f"{timerange['start']}->{timerange['end']}: all_failed")
@@ -66,6 +68,44 @@ class BacktestService:
         raise BacktestRunError(
             "No working backtest data window was found. "
             + "; ".join(failure_notes[-3:])
+        )
+
+    def _candidate_lag_days(self, *, max_lag: int) -> list[int]:
+        default_candidates = list(range(self.config.backtest_data_lag_days, max_lag + 1))
+        cached_lag = self._load_recent_successful_lag(max_lag=max_lag)
+        if cached_lag is None:
+            return default_candidates
+        LOGGER.info("Using cached successful backtest lag of %s days as the first candidate.", cached_lag)
+        return [cached_lag] + [lag for lag in default_candidates if lag > cached_lag]
+
+    def _load_recent_successful_lag(self, *, max_lag: int) -> int | None:
+        cached = self.registry.get_state_value(WINDOW_CACHE_STATE_KEY)
+        if not isinstance(cached, dict):
+            return None
+        lag_days = cached.get("lag_days")
+        resolved_at = cached.get("resolved_at")
+        if not isinstance(lag_days, int) or not isinstance(resolved_at, str):
+            return None
+        if lag_days < self.config.backtest_data_lag_days or lag_days > max_lag:
+            return None
+        try:
+            resolved_time = datetime.fromisoformat(resolved_at)
+        except ValueError:
+            return None
+        if resolved_time.tzinfo is None:
+            resolved_time = resolved_time.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - resolved_time.astimezone(timezone.utc)
+        if age > timedelta(minutes=self.config.backtest_window_cache_minutes):
+            return None
+        return lag_days
+
+    def _store_successful_lag(self, lag_days: int) -> None:
+        self.registry.set_state_value(
+            WINDOW_CACHE_STATE_KEY,
+            {
+                "lag_days": lag_days,
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
     async def cleanup_old_bot_backtests(self) -> None:

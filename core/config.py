@@ -41,6 +41,7 @@ class AppConfig:
     backtest_timeout_seconds: int
     backtest_data_lag_days: int
     backtest_max_additional_lag_days: int
+    backtest_window_cache_minutes: int
     config_file: Path | None
 
 
@@ -84,6 +85,7 @@ def load_config() -> AppConfig:
         backtest_timeout_seconds=int(pick("BACKTEST_TIMEOUT_SECONDS", 900)),
         backtest_data_lag_days=int(pick("BACKTEST_DATA_LAG_DAYS", 3)),
         backtest_max_additional_lag_days=int(pick("BACKTEST_MAX_ADDITIONAL_LAG_DAYS", 5)),
+        backtest_window_cache_minutes=int(pick("BACKTEST_WINDOW_CACHE_MINUTES", 30)),
         config_file=config_file,
     )
 

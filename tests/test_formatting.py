@@ -11,7 +11,7 @@ from services.formatter import (
 )
 from services.hyperliquid_service import MarketInfo
 from services.news_service import DailyBrief, NewsArticle
-from services.prompt_service import TradeStrategy
+from services.prompt_service import TradeStrategy, remove_absolute_price_levels, sanitize_trade_strategy
 
 
 def test_format_daily_brief_matches_new_scope() -> None:
@@ -106,3 +106,36 @@ def test_format_backtest_success_matches_required_shape() -> None:
 
 def test_format_backtest_failure_returns_message() -> None:
     assert format_backtest_failure("All seven backtests failed.") == "All seven backtests failed."
+
+
+def test_sanitize_trade_strategy_replaces_absurd_price_levels_with_fallback_logic() -> None:
+    fallback = TradeStrategy(
+        asset="BIO",
+        suggested_bias="Long",
+        objective="Capture a clean long continuation setup in BIO.",
+        ticker="BIO",
+        timeframe="15min",
+        direction="Long",
+        entry_logic="Wait for a 15min candle close above the nearest breakout level in BIO, then enter on the first shallow retest that holds above VWAP with volume confirmation.",
+        exit_logic="Take partial profits into the first strong extension, trail the remainder behind structure, and exit fully if price closes back through the trigger zone.",
+        risk_management="Risk a fixed small amount per trade, avoid oversized entries after extended candles, and skip the setup if volume confirmation is missing.",
+        backtest_reminder="Backtest before deployment.",
+    )
+    generated = TradeStrategy(
+        asset="BIO",
+        suggested_bias="Long",
+        objective="Capture breakout strength in BIO.",
+        ticker="BIO",
+        timeframe="4H",
+        direction="Long",
+        entry_logic="Enter on a 4H candle close above $2.85 with RSI > 60.",
+        exit_logic="Take profit at $3.40 and stop if price closes below $2.75.",
+        risk_management="Stop-loss at $2.65 if filled, risking 1%.",
+        backtest_reminder="Backtest before deployment.",
+    )
+
+    sanitized = sanitize_trade_strategy(generated, fallback=fallback, current_price=0.017524)
+
+    assert sanitized.entry_logic == fallback.entry_logic
+    assert sanitized.exit_logic == fallback.exit_logic
+    assert sanitized.risk_management == fallback.risk_management

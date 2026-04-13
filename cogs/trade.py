@@ -28,7 +28,8 @@ class TradeCog(commands.Cog):
             await interaction.followup.send(format_trade_asset_not_found(trimmed))
             return
 
-        strategy = await self.bot.services.prompt.generate_trade_strategy(market)
+        current_price = await self.bot.services.hyperliquid.get_mid_price(market.ticker)
+        strategy = await self.bot.services.prompt.generate_trade_strategy(market, current_price=current_price)
         await interaction.followup.send(format_trade_response(strategy))
 
 

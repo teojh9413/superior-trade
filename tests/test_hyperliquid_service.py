@@ -40,3 +40,10 @@ def test_sort_market_candidates_prefers_perp_and_xyz() -> None:
 
     assert sorted_candidates[0].ticker == "XYZ-TSLA"
     assert sorted_candidates[-1].market_type == "spot"
+
+
+def test_market_info_for_bio_core_perp_shape() -> None:
+    market = MarketInfo("BIO", "BIO", "BIO/USDC:USDC", "BIO", "perp", "perp:core", "cross", ("bio",))
+
+    assert market.ticker == "BIO"
+    assert market.pair == "BIO/USDC:USDC"
